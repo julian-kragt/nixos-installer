@@ -35,3 +35,6 @@ go.work.sum
 
 # Built binary
 /nixos-installer
+
+# nix build output
+/result

@@ -100,7 +100,7 @@ func TestResolveInputsCompletesInputsAndLoadsState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, _ := operator("192.168.1.100\n2\n")
+	ctx, _ := operator("\n192.168.1.100\n2\n") // Enter, target, host
 	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas", "broadway")}
 	st, err := resolveInputs(ctx, &in, stateDir)
 	if err != nil {

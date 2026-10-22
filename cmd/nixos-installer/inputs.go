@@ -18,6 +18,9 @@ import (
 // loads the persisted state of the chosen host, since state is keyed by host
 // name. in is completed in place.
 func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*pipeline.State, error) {
+	if err := showInstructions(ctx); err != nil {
+		return nil, err
+	}
 	var st *pipeline.State
 	err := runner.Run(ctx, "Checking inputs", func(ctx context.Context) error {
 		target, err := askTarget(ctx, in.Target)
