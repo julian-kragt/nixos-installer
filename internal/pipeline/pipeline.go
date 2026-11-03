@@ -14,9 +14,10 @@ import (
 // Inputs are the operator's choices for this run. They are complete before
 // the first stage runs.
 type Inputs struct {
-	Host        string // host to install: a directory under hosts/nixos in the config flake
+	Host        string // host to install: an entry of the config flake's `bootstrap` output
 	Target      string // IP address of the target machine
-	ConfigDir   string // path to the nixos-config flake
+	ConfigDir   string // absolute path to the config flake
+	Bootstrap   string // flake reference of nixos-bootstrap
 	Disk        string // disk to install to; empty = detect on the target
 	SSHPassword string // root SSH password for initial key bootstrap; prompts when empty
 }

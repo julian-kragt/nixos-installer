@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -21,19 +22,24 @@ func operator(input string) (context.Context, *bytes.Buffer) {
 	return runner.NewContext(context.Background(), ui), &out
 }
 
-// newConfig creates a config flake directory with the given installable hosts.
+// newConfig creates a config flake directory and puts a `nix` on PATH that
+// reports the given hosts as installable.
 func newConfig(t *testing.T, hosts ...string) string {
 	t.Helper()
 	dir := t.TempDir()
-	for _, h := range hosts {
-		p := filepath.Join(dir, "hosts", "nixos", h)
-		if err := os.MkdirAll(p, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(p, "bootstrap.nix"), nil, 0o644); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.WriteFile(filepath.Join(dir, "flake.nix"), nil, 0o644); err != nil {
+		t.Fatal(err)
 	}
+	list, err := json.Marshal(append([]string{}, hosts...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	script := "#!/bin/sh\nprintf '%s' '" + string(list) + "'\n"
+	if err := os.WriteFile(filepath.Join(bin, "nix"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	return dir
 }
 
@@ -57,23 +63,16 @@ func TestAskTarget(t *testing.T) {
 }
 
 func TestListAndPickHost(t *testing.T) {
-	dir := newConfig(t, "broadway", "atlas")
-	if err := os.MkdirAll(filepath.Join(dir, "hosts", "nixos", "nobootstrap"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	hosts, err := listHosts(dir)
+	dir := newConfig(t, "atlas", "broadway")
+	ctx, _ := operator("2\n")
+	hosts, err := listHosts(ctx, "b", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(hosts, []string{"atlas", "broadway"}) {
 		t.Fatalf("got %v", hosts)
 	}
-	if _, err := listHosts(t.TempDir()); err == nil {
-		t.Error("want an error for a directory that is not a config flake")
-	}
 
-	ctx, _ := operator("2\n")
 	if got, err := pickHost(ctx, hosts, ""); err != nil || got != "broadway" {
 		t.Fatalf("pick: %q %v", got, err)
 	}
@@ -86,6 +85,14 @@ func TestListAndPickHost(t *testing.T) {
 	}
 	if _, err := pickHost(none, hosts, "x"); err == nil {
 		t.Fatal("expected unknown host error")
+	}
+}
+
+func TestListHostsWithoutHosts(t *testing.T) {
+	dir := newConfig(t)
+	ctx, _ := operator("")
+	if _, err := listHosts(ctx, "b", dir); err == nil || !strings.Contains(err.Error(), "no installable hosts") {
+		t.Errorf("err = %v", err)
 	}
 }
 

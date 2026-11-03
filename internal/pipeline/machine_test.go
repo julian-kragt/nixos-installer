@@ -12,11 +12,9 @@ import (
 	"installer/internal/runner"
 )
 
-// loopback is a "remote" machine whose ssh is the local shell, so the command
-// string takes the same route as over ssh: quoted here, parsed by a shell there.
-var loopback = Machine{ssh: []string{"sh", "-c"}}
+var loopback = Loopback()
 
-func TestRunCapturesAndStreamsOutput(t *testing.T) {
+func TestRunReturnsStdoutAndStreamsStderr(t *testing.T) {
 	var screen, file bytes.Buffer
 	ctx := runner.NewContext(context.Background(), runner.New(runner.Options{Out: &screen, File: &file}))
 
@@ -26,11 +24,35 @@ func TestRunCapturesAndStreamsOutput(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		for _, s := range []string{out, file.String()} {
-			if !strings.Contains(s, "out") || !strings.Contains(s, "err") {
-				t.Errorf("%s: %q misses stdout/stderr", name, s)
-			}
+		if out != "out\n" {
+			t.Errorf("%s: stdout = %q, want only stdout", name, out)
 		}
+		if !strings.Contains(file.String(), "err") {
+			t.Errorf("%s: log %q misses stderr", name, file.String())
+		}
+	}
+}
+
+func TestQuietKeepsOutputAway(t *testing.T) {
+	var screen, file bytes.Buffer
+	ctx := runner.NewContext(context.Background(), runner.New(runner.Options{Out: &screen, File: &file}))
+
+	for name, m := range map[string]Machine{"local": {}, "remote": loopback} {
+		file.Reset()
+		_, err := m.Quiet().Run(ctx, "sh", "-c", "echo hunter2 >&2; exit 1")
+		if err == nil || strings.Contains(err.Error(), "hunter2") {
+			t.Errorf("%s: err = %v, want a failure without output", name, err)
+		}
+		if strings.Contains(file.String(), "hunter2") || strings.Contains(screen.String(), "hunter2") {
+			t.Errorf("%s: quiet output reached the runner", name)
+		}
+	}
+}
+
+func TestRemoteCommandsRunWithUmask077(t *testing.T) {
+	out, err := loopback.Run(context.Background(), "umask")
+	if err != nil || strings.TrimSpace(out) != "0077" {
+		t.Fatalf("got %q, %v", out, err)
 	}
 }
 

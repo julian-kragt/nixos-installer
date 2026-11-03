@@ -15,7 +15,8 @@ import (
 // Machine runs commands on a machine: this one (the zero value) or another
 // one over ssh. Authentication is always via key or ssh-agent.
 type Machine struct {
-	ssh []string // ssh argv up to and including the destination; nil = this machine
+	ssh   []string // ssh argv up to and including the destination; nil = this machine
+	quiet bool     // stream nothing to the runner and keep output out of errors
 }
 
 // SSH returns the root account on the machine at addr, authenticating via
@@ -33,10 +34,22 @@ func SSH(addr string) Machine {
 	}}
 }
 
-// Run runs a command and returns its combined stdout and stderr, which is also
-// streamed to the runner task in ctx. A command that cannot be started or
-// exits non-zero is an error; it wraps *exec.ExitError for callers that need
-// the exit code.
+// Loopback is a "remote" machine whose ssh is the local shell, so a command
+// takes the same route as over ssh: quoted here, parsed by a shell there. For
+// tests of code that runs on the target.
+func Loopback() Machine { return Machine{ssh: []string{"sh", "-c"}} }
+
+// Quiet returns m with its output kept away from the runner, the log file and
+// error messages. Use it for every command that can print a secret.
+func (m Machine) Quiet() Machine {
+	m.quiet = true
+	return m
+}
+
+// Run runs a command and returns its stdout. Stderr is streamed to the runner
+// task in ctx unless m is quiet. A command that cannot be started or exits
+// non-zero is an error that ends with the last line of stderr; it wraps
+// *exec.ExitError for callers that need the exit code.
 func (m Machine) Run(ctx context.Context, name string, args ...string) (string, error) {
 	return m.RunStdin(ctx, nil, name, args...)
 }
@@ -45,23 +58,25 @@ func (m Machine) Run(ctx context.Context, name string, args ...string) (string, 
 func (m Machine) RunStdin(ctx context.Context, stdin io.Reader, name string, args ...string) (string, error) {
 	argv := append([]string{name}, args...)
 	if m.ssh != nil {
-		argv = append(slices.Clone(m.ssh), shellJoin(argv))
+		argv = append(slices.Clone(m.ssh), "umask 077 && "+shellJoin(argv))
 	}
 	process := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	process.Stdin = stdin
 
-	var output bytes.Buffer
-	w := io.MultiWriter(&output, runner.Output(ctx))
-	process.Stdout = w
-	process.Stderr = w
+	var stdout, stderr bytes.Buffer
+	process.Stdout = &stdout
+	process.Stderr = &stderr
+	if !m.quiet {
+		process.Stderr = io.MultiWriter(&stderr, runner.Output(ctx))
+	}
 
 	if err := process.Run(); err != nil {
-		if last := lastLine(output.String()); last != "" {
+		if last := lastLine(stderr.String()); last != "" && !m.quiet {
 			return "", fmt.Errorf("%s: %w: %s", name, err, last)
 		}
 		return "", fmt.Errorf("%s: %w", name, err)
 	}
-	return output.String(), nil
+	return stdout.String(), nil
 }
 
 // shellJoin quotes argv for the remote shell: ssh hands it a single string.

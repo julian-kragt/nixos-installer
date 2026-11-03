@@ -12,7 +12,7 @@ func TestParseFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.Target != "192.168.1.100" || o.Host != "atlas" || o.ConfigDir != "" || o.Disk != "" || !o.verbose {
+	if o.Target != "192.168.1.100" || o.Host != "atlas" || o.ConfigDir != "" || o.Disk != "" || o.Bootstrap != defaultBootstrap || !o.verbose {
 		t.Fatalf("got %+v", o)
 	}
 	empty, err := parseFlags(nil, &buf)

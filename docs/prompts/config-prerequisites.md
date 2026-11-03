@@ -1,7 +1,7 @@
-The Go installer in `~/src/installer` (see its `docs/ROADMAP.md`, "Prerequisites outside this repo") needs these changes in this flake. Plan them as three separate commits and tell me which installer stage each one unblocks.
+The Go installer in `~/src/installer` (see its `docs/ROADMAP.md`, "Prerequisites outside this repo") needs these changes in this flake. Plan what is still open and tell me which installer stage it unblocks.
 
-- **B1**: the working tree has the unfinished provisionSpec → `installHosts` change; review it and get it committed. Make each `hosts/nixos/<host>/disko.nix` read its device from `./install.json` (`{"disk": "/dev/…"}`, written by the installer and committed like `hardware-configuration.nix`); add `install.json` for atlas (`/dev/nvme0n1`) and decide what broadway has until it is installed. `nix eval --json .#installHosts` must still return `disk`.
-- **B2** in `modules/bootstrap-base.nix`: `environment.systemPackages` with git, sops, age, ssh-to-age, vim; `nix.settings.experimental-features` = nix-command, flakes, pipe-operators (today only `hosts/common/core/nix-settings.nix` sets them, and the target must evaluate this flake); GitHub's host key in `programs.ssh.knownHosts`.
+- **B1**: done, and superseded: the config's `installer.<host>` adapter is gone. The config's `bootstrap/` mapper feeds nixos-bootstrap's `installerData.<host>`.
+- **B2**: replaced by nixos-bootstrap, whose system already has these packages, nix features and the GitHub host key.
 - **B3**: remove `users.users.root.initialPassword = "test"` from `hosts/nixos/atlas/default.nix`; remove the `sopsUserAgeKeys` pending-key activation script from `hosts/common/accounts/secrets.nix` (the operator key is no longer copied to hosts); add the GitHub known host to the full config as well.
 
-Do not delete `scripts/install-host.sh` or the just recipes yet; that happens when the installer is complete. Verify with `nix flake check` or at least `nix build .#nixosConfigurations.atlas-bootstrap.config.system.build.toplevel --dry-run` and the same for `atlas`.
+Do not delete `scripts/install-host.sh` or the just recipes yet; that happens when the installer is complete. Verify with `nix flake check` or at least `nix build .#nixosConfigurations.atlas.config.system.build.toplevel --dry-run`.

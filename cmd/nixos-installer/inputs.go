@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"installer/internal/nix"
 	"installer/internal/pipeline"
 	"installer/internal/runner"
 )
@@ -31,7 +32,7 @@ func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*
 		if err != nil {
 			return err
 		}
-		hosts, err := listHosts(configDir)
+		hosts, err := listHosts(ctx, in.Bootstrap, configDir)
 		if err != nil {
 			return err
 		}
@@ -66,16 +67,16 @@ func askTarget(ctx context.Context, target string) (string, error) {
 	})
 }
 
-// askConfigDir returns dir, or asks for the nixos-config directory until it
-// holds a hosts/nixos directory when dir is empty. A leading ~ is expanded.
+// askConfigDir returns dir, or asks for the config flake's directory until it
+// holds a flake.nix when dir is empty. A leading ~ is expanded.
 func askConfigDir(ctx context.Context, dir string) (string, error) {
 	if dir != "" {
 		return filepath.Abs(expandHome(dir))
 	}
-	return askUntil(ctx, "Path to nixos-config", "--config", func(s string) (string, error) {
+	return askUntil(ctx, "Path to the config flake", "--config", func(s string) (string, error) {
 		s = expandHome(s)
-		if fi, err := os.Stat(filepath.Join(s, "hosts", "nixos")); s == "" || err != nil || !fi.IsDir() {
-			return "", fmt.Errorf("%q has no hosts/nixos", s)
+		if _, err := os.Stat(filepath.Join(s, "flake.nix")); s == "" || err != nil {
+			return "", fmt.Errorf("%q has no flake.nix", s)
 		}
 		return filepath.Abs(s)
 	})
@@ -111,26 +112,15 @@ func expandHome(p string) string {
 	return p
 }
 
-// listHosts returns the hosts that are valid install targets: directories
-// under <configDir>/hosts/nixos that contain bootstrap.nix.
-func listHosts(configDir string) ([]string, error) {
-	root := filepath.Join(configDir, "hosts", "nixos")
-	entries, err := os.ReadDir(root)
+// listHosts returns the hosts that are valid install targets: the entries of
+// the config's mapper, as nixos-bootstrap reports them.
+func listHosts(ctx context.Context, bootstrap, configDir string) ([]string, error) {
+	hosts, err := nix.ListHosts(ctx, pipeline.Machine{}, nix.Flakes{Bootstrap: bootstrap, Config: configDir})
 	if err != nil {
 		return nil, fmt.Errorf("list hosts: %w", err)
 	}
-	var hosts []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(root, e.Name(), "bootstrap.nix")); err == nil {
-			hosts = append(hosts, e.Name())
-		}
-	}
-	slices.Sort(hosts)
 	if len(hosts) == 0 {
-		return nil, fmt.Errorf("no installable hosts found in %s", root)
+		return nil, fmt.Errorf("no installable hosts: the `bootstrap` output of %s is empty", configDir)
 	}
 	return hosts, nil
 }

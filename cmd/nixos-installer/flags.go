@@ -9,6 +9,9 @@ import (
 	"installer/internal/pipeline"
 )
 
+// defaultBootstrap is the nixos-bootstrap flake the installer evaluates.
+const defaultBootstrap = "github:julian-kragt/nixos-bootstrap"
+
 // options are the command-line inputs. Empty inputs are completed by
 // resolveInputs.
 type options struct {
@@ -23,7 +26,8 @@ func parseFlags(args []string, stderr io.Writer) (options, error) {
 	fs := flag.NewFlagSet("nixos-installer", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.BoolVar(&o.verbose, "verbose", false, "Enable verbose logging")
-	fs.StringVar(&o.ConfigDir, "config", "", "Path to the nixos-config flake (prompts when empty)")
+	fs.StringVar(&o.ConfigDir, "config", "", "Path to the config flake (prompts when empty)")
+	fs.StringVar(&o.Bootstrap, "bootstrap", defaultBootstrap, "Flake reference of nixos-bootstrap")
 	fs.StringVar(&o.Host, "host", "", "Host to install (prompts when empty)")
 	fs.StringVar(&o.Target, "target", "", "IP address of the target device (prompts when empty)")
 	fs.StringVar(&o.Disk, "disk", "", "Disk to install to, e.g. /dev/nvme0n1 (detected on the target when empty)")
