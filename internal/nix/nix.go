@@ -37,7 +37,7 @@ func (f Flakes) eval(ctx context.Context, m pipeline.Machine, attr string, out a
 	return EvalJSON(ctx, m, f.Bootstrap+"#"+attr, out, args...)
 }
 
-// HostInfo is nixos-bootstrap's installerData.<host>: the config's mapper for
+// HostInfo is nixos-bootstrap's installerData.<host>: the config's entry for
 // one host, checked.
 type HostInfo struct {
 	System             string          `json:"system"`
@@ -59,7 +59,7 @@ func EvalHostInfo(ctx context.Context, m pipeline.Machine, f Flakes, host string
 	return info, err
 }
 
-// ListHosts returns the hosts the config's mapper can install.
+// ListHosts returns the hosts the config has an entry for.
 func ListHosts(ctx context.Context, m pipeline.Machine, f Flakes) ([]string, error) {
 	var hosts []string
 	err := f.eval(ctx, m, "installerData", &hosts, "--apply", "builtins.attrNames")
@@ -67,7 +67,7 @@ func ListHosts(ctx context.Context, m pipeline.Machine, f Flakes) ([]string, err
 }
 
 // EvalDisks returns the devices of the host's disko layout, by disk name.
-// installerData leaves the layout out, so this reads the bootstrap system.
+// It reads the bootstrap system; installerData.<host>.disks holds the same map.
 func EvalDisks(ctx context.Context, m pipeline.Machine, f Flakes, host string) (map[string]string, error) {
 	var disks map[string]string
 	err := f.eval(ctx, m, "nixosConfigurations."+host+".config.disko.devices.disk", &disks,
@@ -76,7 +76,7 @@ func EvalDisks(ctx context.Context, m pipeline.Machine, f Flakes, host string) (
 }
 
 // CheckBootstrapSystem evaluates the host's whole bootstrap system. installerData
-// only checks the mapper's fields; this also runs disko's options, NixOS's
+// only checks the entry's fields; this also runs disko's options, NixOS's
 // assertions and the hardware config.
 func CheckBootstrapSystem(ctx context.Context, m pipeline.Machine, f Flakes, host string) error {
 	var drvPath string

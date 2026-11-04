@@ -4,16 +4,14 @@ Companion to [CONTEXT.md](CONTEXT.md). Each row in "Order of work" has a prompt 
 
 ## Goal
 
-Replace `config/scripts/install-host.sh` and `just install | enroll-sops | deploy-remote` with the Go installer. Spec for "what": the stage table in `docs/CONTEXT.md` §5 (the Pipeline doc itself is not in any repo). Reference for "how": the bash script.
+Replace `install-host.sh` and `just install | enroll-sops | deploy-remote` with the Go installer. Spec for "what": the stage table in `docs/CONTEXT.md` §5 (the Pipeline doc itself is not in any repo). Reference for "how": the bash script, removed from nixos-config and kept in its history (`git -C ../nixos-config show 06dd040:scripts/install-host.sh`).
 
-## State of things (2026-10-13)
-
-`docs/CONTEXT.md` §1, §4 and §7 describe the installer as it is now. §3 (nix-secrets) and §6 (open decisions) are stale; the points below and "Decisions" replace them.
+## State of things (2026-11-03)
 
 - **installer**: stages are plain functions listed in `stages.All`; `pipeline.Machine` runs a command on the provider or, through the system `ssh`, on the target; `pipeline.State` (`Host`, `Disk`, `Completed`) is one JSON file per host. Stages 0.0 and 0.1 exist (`Machine` has `Quiet()`, `Loopback()`, split stdout/stderr; `internal/nix`, `internal/git` exist; 0.2 re-asks the passphrase with `askAndSendPassphrase` when `/tmp/disko-password` is gone). `pipeline.SSH` and `BootstrapKey` (`bootstrap.go`) still skip host key checking (a TODO in each). Build and tests are green.
-- **nix-secrets**: already on `hosts/<host>.yaml` + `host-users/<host>-<user>.yaml`; `.sops.yaml` deduped with anchored regexes; `shared.yaml` and `users/` are gone. No entries for `broadway` or `media`. `hosts/workhorse.yaml` is 0 bytes. `templates/user.yaml` = `hashedPassword` only.
-- **config**: reads `host-users/…`. User SSH keys no longer come from secrets, so the only per-user secret is `hashedPassword`, decrypted by system sops-nix with the host key. The config's `installer.<host>` adapter and `<host>-bootstrap` systems are gone: its `bootstrap/` mapper feeds the separate nixos-bootstrap flake, and the installer reads `<bootstrap>#installerData.<host>` (`internal/nix`, with the config passed by `--override-input config`). Still open: B3 below. `install-host.sh` and the justfile still read the removed `provisionSpec`, so **the bash path no longer runs**.
-- **provider (workhorse)**: has `go` (`~/sdk/go1.27.1/bin/go`), `nix`, `git`, `ssh`; no `sops`, `age`, `ssh-to-age` in PATH.
+- **nix-secrets**: a setup only, not in use (CONTEXT §3). The layout is `hosts/<host>.yaml` + `host-users/<host>-<user>.yaml`, and `.sops.yaml` has anchored regexes, but no secret in it is relied on and the provider has no clone. `templates/user.yaml` = `hashedPassword` only.
+- **config**: reads `host-users/…`. User SSH keys no longer come from secrets, so the only per-user secret is `hashedPassword`, decrypted by system sops-nix with the host key. The config's `installer.<host>` adapter and `<host>-bootstrap` systems are gone: its `bootstrap/` entries feed the separate nixos-bootstrap flake, and the installer reads `<bootstrap>#installerData.<host>` (`internal/nix`, with the config passed by `--override-input config`). Still open: B3 below. `install-host.sh` and its just recipes are removed, so **the Go installer is the only install path, and it is not complete yet**.
+- **provider (workhorse)**: has `nix`, `git`, `ssh`; `go` comes from `nix develop`; no `sops`, `age`, `ssh-to-age` in PATH.
 
 ## Decisions (settled)
 
@@ -32,10 +30,13 @@ Replace `config/scripts/install-host.sh` and `just install | enroll-sops | deplo
 
 There is no separate plumbing milestone: shared plumbing is built by the first stage that needs it.
 
+Done: 0.0 and 0.1. Next: 0.2.
+
 | # | Stage | Runs on | Needs | Introduces shared plumbing | Writes State | Prompt |
 |---|---|---|---|---|---|---|
 | – | Prep | provider | – | – | – | [00-prep.md](prompts/00-prep.md) |
-| – | Config prerequisites | `~/src/config` | – | – | – | [config-prerequisites.md](prompts/config-prerequisites.md) |
+| – | Config prerequisites | `../nixos-config` | – | – | – | [config-prerequisites.md](prompts/config-prerequisites.md) |
+| 0.0 | Environment preparation | provider (+target checks) | – | `pipeline.Machine`, `BootstrapKey` | – | – |
 | 0.1 | Provider preparation | provider (+target checks) | 0.0 | `Machine` stdout/stderr split and `Quiet()`, `pipeline.Loopback()`, disk resolution (moved from 0.0), `internal/nix`, `internal/git` | – | [0.1-provider-preparation.md](prompts/0.1-provider-preparation.md) |
 | 0.2 | Base install | provider → target | 0.1 | host key pinning (`pipeline.SSH` and `BootstrapKey`), `Machine.SSHArgs()`, `pipeline.NewEnv`, `Inputs.StateDir` | `HostKeyFingerprint` | [0.2-base-install.md](prompts/0.2-base-install.md) |
 | 1.1 | Host identity | target | 0.2 | ssh→age in-process | `HostRecipient` | [1.1-host-identity.md](prompts/1.1-host-identity.md) |
@@ -51,13 +52,13 @@ There is no separate plumbing milestone: shared plumbing is built by the first s
 | 3.3 | Cleanup | target | 3.2 | – | – | [3.3-cleanup.md](prompts/3.3-cleanup.md) |
 | 4.1 | Policy | provider | 2.4 | – | – | [4.1-policy.md](prompts/4.1-policy.md) |
 | 4.2 | Recovery (CLI) | provider | all | subcommands, re-run of done stages | – | [4.2-recovery-cli.md](prompts/4.2-recovery-cli.md) |
-| – | Retire bash, package | both repos | all | – | – | [retire-bash.md](prompts/retire-bash.md) |
+| – | Finish retiring bash | both repos | all | – | – | [retire-bash.md](prompts/retire-bash.md) |
 
 ## Prerequisites outside this repo
 
 - **B2**: replaced by nixos-bootstrap, whose system has the packages, nix features and github.com known host.
 - **B3 (before 3.2)** config: remove `users.users.root.initialPassword = "test"`; remove the `sopsUserAgeKeys` pending-key script; github.com known host in the full config.
-- **nix-secrets**: fix or delete the empty `hosts/workhorse.yaml`; `&user_media` or rely on the primary-user fallback before installing broadway.
+- **nix-secrets (before 2.2)**: add the `&operator` anchor. The rest of its content is setup only: 2.2 and 2.3 write the host and user entries.
 
 ## Plumbing design
 
@@ -65,7 +66,7 @@ Direction from the 2026-10-13 structure review of the code against this roadmap.
 
 | Area | Design | Built by |
 |---|---|---|
-| `Machine` output | Stdout and stderr are captured separately. `Run` returns stdout only; stderr streams to the runner unless quiet; the error text comes from the stderr tail. (Today both streams are one buffer, so `nix eval --json` breaks on a `warning:` line and a quiet command would leak its output into the error.) | 0.1 |
+| `Machine` output | Stdout and stderr are captured separately. `Run` returns stdout only; stderr streams to the runner unless quiet; the error text comes from the stderr tail. | 0.1 |
 | `Machine` shape | A struct with fields (address, known-hosts path, flags), not a raw argv. Copy-returning modifiers instead of more `Run*` methods: `Quiet()`, `WithAgent()`, `Interactive()`; `SSHArgs()` for tools that spawn ssh themselves. Remote commands run with `umask 077` by default, so that rule does not depend on each stage. | `Quiet` 0.1, `SSHArgs` 0.2, `WithAgent` 2.0, `Interactive` 2.3 |
 | Host key | Pins are keyed by host name (`HostKeyAlias=<host>`), in a per-host known_hosts under the state dir, not by IP (the target IP is a per-run input). The ISO key is pinned at first contact in 0.0 and its fingerprint shown; the installed system's key replaces it in 0.2. Applies to `pipeline.SSH` and to `BootstrapKey`. | 0.2 |
 | `ControlMaster` | Not used until commands are measured slow. OpenSSH applies the master's `ForwardAgent` to multiplexed sessions (verify), which conflicts with per-command `-A`; if used, put the forwarding mode in `ControlPath`, and keep it short (macOS socket paths: 104 bytes). | – |
@@ -84,8 +85,8 @@ Direction from the 2026-10-13 structure review of the code against this roadmap.
 - Idempotent and safe to re-run. Git commits only for listed paths and only when something changed.
 - A stage has no own header (`pipeline.Run` wraps it); sub-steps use `runner.Run` / `runner.Parallel`; parallel steps return values and never write `env.State`.
 - A fact a later run needs is a field on `pipeline.State`, added by the stage that first writes it. A new flag is a field on `pipeline.Inputs` and a line in `cmd/nixos-installer/flags.go`.
-- `go build ./... && go vet ./... && go test -race ./...` green after every stage.
+- `go build ./... && go vet ./... && go test -race ./...` (in `nix develop`) green after every stage.
 
 ## End-to-end check
 
-`go run ./cmd/nixos-installer --config ../config --host <h> --target <ip>` against a target booted from the NixOS ISO; run it a second time and confirm nothing is redone and no new commits appear in nix-secrets or config. A throwaway VM host in config (same CPU architecture as the Mac) avoids wiping atlas. Final acceptance: fresh install, `secrets` run after adding and after removing a `home/<u>/<host>.nix`, and a reinstall of the same host.
+`nix develop -c go run ./cmd/nixos-installer --config ../nixos-config --host <h> --target <ip>` against a target booted from the NixOS ISO; run it a second time and confirm nothing is redone and no new commits appear in nix-secrets or config. A throwaway VM host in config (same CPU architecture as the Mac) avoids wiping atlas. Final acceptance: fresh install, `secrets` run after adding and after removing a `home/<u>/<host>.nix`, and a reinstall of the same host.

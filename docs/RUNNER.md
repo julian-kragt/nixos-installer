@@ -51,7 +51,7 @@ i, err := runner.Choose(ctx, "Select the install disk:", items)   // numbered li
 - Logging goes through `ctx` only. `Task` handles lifecycle only.
 - `pipeline.Run` already wraps each stage in `runner.Run(ctx, "<id> <name>", ...)`. A stage must **not** create its own header; use `runner.Run` for sub-steps.
 - `go test -race` is required. Parallel steps must not write `env.State`: return results, assign after the join.
-- Commands that handle secrets must not stream output via `runner.Output` (no opt-out exists yet; add one to `pipeline.Machine` with the first such command).
+- Commands that handle secrets must not stream output via `runner.Output`: run them on `Machine.Quiet()`.
 - Debug level: `Debug` lines and `StartDebug` tasks show only with `--verbose`, but always go to the log file.
 
 ## Behaviour worth knowing

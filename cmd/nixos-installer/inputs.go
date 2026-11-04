@@ -112,8 +112,8 @@ func expandHome(p string) string {
 	return p
 }
 
-// listHosts returns the hosts that are valid install targets: the entries of
-// the config's mapper, as nixos-bootstrap reports them.
+// listHosts returns the hosts that are valid install targets: the config's
+// entries, as nixos-bootstrap reports them.
 func listHosts(ctx context.Context, bootstrap, configDir string) ([]string, error) {
 	hosts, err := nix.ListHosts(ctx, pipeline.Machine{}, nix.Flakes{Bootstrap: bootstrap, Config: configDir})
 	if err != nil {
