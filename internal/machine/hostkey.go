@@ -1,4 +1,4 @@
-package pipeline
+package machine
 
 import (
 	"bytes"
@@ -69,6 +69,34 @@ func Fingerprint(key ssh.PublicKey) string { return ssh.FingerprintSHA256(key) }
 // ScanHostKey returns the ed25519 host key offered at addr:22, without logging in.
 func ScanHostKey(ctx context.Context, addr string) (ssh.PublicKey, error) {
 	return scanHostKey(ctx, net.JoinHostPort(addr, "22"))
+}
+
+// hostKeyPollInterval is a variable so tests can change it.
+var hostKeyPollInterval = 5 * time.Second
+
+// WaitForNewHostKey polls addr until it offers a key other than old, which is the
+// ISO's: until then the machine has not rebooted, or is at the passphrase prompt
+// with no ssh at all.
+func WaitForNewHostKey(ctx context.Context, addr string, old ssh.PublicKey, timeout time.Duration) (ssh.PublicKey, error) {
+	return waitForNewHostKey(ctx, old, timeout, func(ctx context.Context) (ssh.PublicKey, error) {
+		return ScanHostKey(ctx, addr)
+	})
+}
+
+func waitForNewHostKey(ctx context.Context, old ssh.PublicKey, timeout time.Duration, scan func(context.Context) (ssh.PublicKey, error)) (ssh.PublicKey, error) {
+	ctx, cancel := context.WithTimeoutCause(ctx, timeout,
+		fmt.Errorf("the installed system did not come up within %s; run the installer again once it has", timeout))
+	defer cancel()
+	for {
+		if key, err := scan(ctx); err == nil && !SameKey(key, old) {
+			return key, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, context.Cause(ctx)
+		case <-time.After(hostKeyPollInterval):
+		}
+	}
 }
 
 func scanHostKey(ctx context.Context, hostPort string) (ssh.PublicKey, error) {

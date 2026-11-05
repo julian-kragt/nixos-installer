@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -26,6 +27,22 @@ func Ask(ctx context.Context, prompt string) (string, error) {
 	line, err := r.readLine(ctx)
 	r.endPrompt(shown, line, err)
 	return line, err
+}
+
+// RequireTyped asks prompt and returns nil when the operator types word, refused
+// for any other answer and noOperator when there is nobody to ask.
+func RequireTyped(ctx context.Context, prompt, word string, noOperator, refused error) error {
+	answer, err := Ask(ctx, prompt)
+	if errors.Is(err, io.EOF) {
+		return noOperator
+	}
+	if err != nil {
+		return err
+	}
+	if answer != word {
+		return refused
+	}
+	return nil
 }
 
 // AskSecret is like Ask but does not echo the input. On a real terminal the

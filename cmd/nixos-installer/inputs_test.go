@@ -62,6 +62,35 @@ func TestAskTarget(t *testing.T) {
 	}
 }
 
+func TestAskConfigDir(t *testing.T) {
+	dir := newConfig(t)
+	ctx, _ := operator("")
+	if got, err := askConfigDir(ctx, dir); err != nil || got != dir {
+		t.Errorf("given config: got %q, %v", got, err)
+	}
+	if _, err := askConfigDir(ctx, t.TempDir()); err == nil || !strings.Contains(err.Error(), "no flake.nix") {
+		t.Errorf("given config without flake.nix: err = %v", err)
+	}
+	if _, err := askConfigDir(ctx, ""); err == nil || !strings.Contains(err.Error(), "--config") {
+		t.Errorf("EOF: err = %v, want a hint at --config", err)
+	}
+	ctx, out := operator(t.TempDir() + "\n" + dir + "\n")
+	if got, err := askConfigDir(ctx, ""); err != nil || got != dir {
+		t.Errorf("asked: got %q, %v", got, err)
+	}
+	if !strings.Contains(out.String(), "no flake.nix") {
+		t.Errorf("bad answer not explained: %q", out.String())
+	}
+}
+
+func TestListHostsWithoutNix(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	ctx, _ := operator("")
+	if _, err := listHosts(ctx, t.TempDir()); err == nil || !strings.Contains(err.Error(), "nix not found") {
+		t.Errorf("err = %v", err)
+	}
+}
+
 func TestListAndPickHost(t *testing.T) {
 	dir := newConfig(t, "atlas", "broadway")
 	ctx, _ := operator("2\n")
@@ -102,7 +131,7 @@ func TestResolveInputsCompletesInputsAndLoadsState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	saved.Disk = "/dev/vda"
+	saved.Completed = []string{"0.1"}
 	if err := saved.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +145,7 @@ func TestResolveInputsCompletesInputsAndLoadsState(t *testing.T) {
 	if in.Target != "192.168.1.100" || in.Host != "broadway" {
 		t.Errorf("inputs: %+v", in)
 	}
-	if st.Host != "broadway" || st.Disk != "/dev/vda" {
+	if st.Host != "broadway" || len(st.Completed) != 1 {
 		t.Errorf("state: %+v", st)
 	}
 }

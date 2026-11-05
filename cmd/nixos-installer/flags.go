@@ -26,7 +26,6 @@ func parseFlags(args []string, stderr io.Writer) (options, error) {
 	fs.StringVar(&o.ConfigDir, "config", "", "Path to the config flake (prompts when empty)")
 	fs.StringVar(&o.Host, "host", "", "Host to install (prompts when empty)")
 	fs.StringVar(&o.Target, "target", "", "IP address of the target device (prompts when empty)")
-	fs.StringVar(&o.Disk, "disk", "", "Disk to install to, e.g. /dev/nvme0n1 (detected on the target when empty)")
 	fs.StringVar(&o.SSHPassword, "ssh-password", "", "Root SSH password of the NixOS ISO for the initial key bootstrap (prompts when empty)")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err

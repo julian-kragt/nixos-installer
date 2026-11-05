@@ -1,4 +1,4 @@
-package pipeline
+package machine
 
 import (
 	"context"
@@ -202,20 +202,5 @@ func TestInstallAuthorizedKeysChecksThePinBeforeThePassword(t *testing.T) {
 	}
 	if got := <-received; got != "ssh-ed25519 AAAA\n" {
 		t.Errorf("keys sent = %q", got)
-	}
-}
-
-func TestNewEnvPinsRemote(t *testing.T) {
-	dir := t.TempDir()
-	st, err := LoadState(dir, "atlas")
-	if err != nil {
-		t.Fatal(err)
-	}
-	env := NewEnv(Inputs{Target: "192.0.2.1"}, st)
-	if env.Pin.File != filepath.Join(dir, "atlas.known_hosts") || env.Pin.Host != "atlas" {
-		t.Errorf("pin = %+v", env.Pin)
-	}
-	if !slices.Contains(env.Remote.ssh, "HostKeyAlias=atlas") {
-		t.Errorf("remote = %q", env.Remote.ssh)
 	}
 }

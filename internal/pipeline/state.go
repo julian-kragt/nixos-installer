@@ -6,16 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
 // State is what must survive a restart of the installer, per host. Choices
 // the operator makes again on every run belong in Inputs.
 type State struct {
 	Host      string
-	Disk      string   // install disk the stages work on
 	Completed []string // IDs of the stages that are done
-
-	HostKeyFingerprint string // the installed system's SSH host key
 
 	path string
 }
@@ -36,6 +34,9 @@ func LoadState(dir, host string) (*State, error) {
 	}
 	return s, nil
 }
+
+// IsCompleted reports whether the stage with this ID is done.
+func (s *State) IsCompleted(id string) bool { return slices.Contains(s.Completed, id) }
 
 // Path is the file s is saved to.
 func (s *State) Path() string { return s.path }

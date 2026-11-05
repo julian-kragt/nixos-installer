@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -226,5 +227,25 @@ func TestAskSecretReadsALineFromAPipe(t *testing.T) {
 	}
 	if strings.Contains(file.String(), "hunter2") {
 		t.Errorf("secret in the log file: %q", file.String())
+	}
+}
+
+func TestRequireTyped(t *testing.T) {
+	noOperator, refused := errors.New("no operator"), errors.New("refused")
+	cases := []struct {
+		name, input string
+		want        error
+	}{
+		{"the word", "go\n", nil},
+		{"the word with spaces", "  go \n", nil},
+		{"another answer", "no\n", refused},
+		{"nobody to ask", "", noOperator},
+	}
+	for _, c := range cases {
+		ui := New(Options{In: strings.NewReader(c.input)})
+		err := RequireTyped(NewContext(context.Background(), ui), "Type go: ", "go", noOperator, refused)
+		if !errors.Is(err, c.want) {
+			t.Errorf("%s: err = %v, want %v", c.name, err, c.want)
+		}
 	}
 }

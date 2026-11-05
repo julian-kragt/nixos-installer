@@ -23,7 +23,6 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want.Disk = "/dev/vda"
 	want.Completed = []string{"1.0"}
 	if err := want.Save(); err != nil {
 		t.Fatal(err)

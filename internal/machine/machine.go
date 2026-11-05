@@ -1,4 +1,6 @@
-package pipeline
+// Package machine runs commands on the provider and, over ssh, on the target, and
+// holds what it takes to trust and log in to the target.
+package machine
 
 import (
 	"bytes"
@@ -12,12 +14,15 @@ import (
 	"installer/internal/runner"
 )
 
-// Machine runs commands on a machine: this one (the zero value) or another
-// one over ssh. Authentication is always via key or ssh-agent.
+// Machine runs commands on a machine: this one (Local) or another one over ssh
+// (SSH). Authentication is always via key or ssh-agent.
 type Machine struct {
 	ssh   []string // ssh argv up to and including the destination; nil = this machine
 	quiet bool     // stream nothing to the runner and keep output out of errors
 }
+
+// Local returns the machine the installer runs on.
+func Local() Machine { return Machine{} }
 
 // SSH returns the root account on the machine at addr, authenticating via
 // ssh-agent and ~/.ssh keys. Only the key in pin is accepted for it. BatchMode=yes

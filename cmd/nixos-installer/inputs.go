@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"installer/internal/machine"
 	"installer/internal/nix"
 	"installer/internal/pipeline"
 	"installer/internal/runner"
@@ -68,18 +70,22 @@ func askTarget(ctx context.Context, target string) (string, error) {
 }
 
 // askConfigDir returns dir, or asks for the config flake's directory until it
-// holds a flake.nix when dir is empty. A leading ~ is expanded.
+// holds a flake.nix when dir is empty.
 func askConfigDir(ctx context.Context, dir string) (string, error) {
 	if dir != "" {
-		return filepath.Abs(expandHome(dir))
+		return checkConfigDir(dir)
 	}
-	return askUntil(ctx, "Path to the config flake", "--config", func(s string) (string, error) {
-		s = expandHome(s)
-		if _, err := os.Stat(filepath.Join(s, "flake.nix")); s == "" || err != nil {
-			return "", fmt.Errorf("%q has no flake.nix", s)
-		}
-		return filepath.Abs(s)
-	})
+	return askUntil(ctx, "Path to the config flake", "--config", checkConfigDir)
+}
+
+// checkConfigDir returns the absolute path of dir, with a leading ~ expanded, if
+// it holds a flake.nix.
+func checkConfigDir(dir string) (string, error) {
+	dir = expandHome(dir)
+	if _, err := os.Stat(filepath.Join(dir, "flake.nix")); dir == "" || err != nil {
+		return "", fmt.Errorf("%q has no flake.nix", dir)
+	}
+	return filepath.Abs(dir)
 }
 
 // askUntil asks for label until check accepts the answer and returns what
@@ -115,7 +121,10 @@ func expandHome(p string) string {
 // listHosts returns the hosts that are valid install targets: the config's
 // entries, as nixos-bootstrap reports them.
 func listHosts(ctx context.Context, configDir string) ([]string, error) {
-	hosts, err := nix.ListHosts(ctx, pipeline.Machine{}, configDir)
+	if _, err := exec.LookPath("nix"); err != nil {
+		return nil, errors.New("nix not found in PATH")
+	}
+	hosts, err := nix.Config{Machine: machine.Local(), Dir: configDir}.Hosts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list hosts: %w", err)
 	}

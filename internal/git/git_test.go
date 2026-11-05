@@ -6,9 +6,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
-	"installer/internal/pipeline"
+	"installer/internal/machine"
 )
 
 var ctx = context.Background()
@@ -54,50 +55,96 @@ func TestParseStatus(t *testing.T) {
 
 func TestPrefixAndDirty(t *testing.T) {
 	dir := newRepo(t)
-	m := pipeline.Machine{}
-	if p, err := Prefix(ctx, m, filepath.Join(dir, "sub")); err != nil || p != "sub/" {
+	r := Repo{machine.Local(), dir}
+	if p, err := (Repo{machine.Local(), filepath.Join(dir, "sub")}).Prefix(ctx); err != nil || p != "sub/" {
 		t.Fatalf("prefix = %q, %v", p, err)
 	}
-	if _, err := Prefix(ctx, m, t.TempDir()); err == nil {
+	if _, err := (Repo{machine.Local(), t.TempDir()}).Prefix(ctx); err == nil {
 		t.Fatal("want an error outside a repository")
 	}
 	write(t, dir, "sub/a", "2")
 	write(t, dir, "untracked", "x")
-	got, err := Dirty(ctx, m, dir)
+	got, err := r.Dirty(ctx)
 	if err != nil || !slices.Equal(got, []string{"sub/a"}) {
 		t.Fatalf("got %q, %v", got, err)
 	}
 }
 
-func TestHasUpstream(t *testing.T) {
-	dir := newRepo(t)
-	m := pipeline.Machine{}
-	if ok, err := HasUpstream(ctx, m, dir); err != nil || ok {
-		t.Fatalf("no remote: got %v, %v", ok, err)
-	}
+// pushed gives the repository at dir an upstream.
+func pushed(t *testing.T, dir string) {
+	t.Helper()
 	remote := t.TempDir()
 	sh(t, remote, "init", "-q", "--bare", "-b", "main")
 	sh(t, dir, "remote", "add", "origin", remote)
 	sh(t, dir, "push", "-q", "-u", "origin", "main")
-	if ok, err := HasUpstream(ctx, m, dir); err != nil || !ok {
+}
+
+func TestHasUpstream(t *testing.T) {
+	dir := newRepo(t)
+	r := Repo{machine.Local(), dir}
+	if ok, err := r.HasUpstream(ctx); err != nil || ok {
+		t.Fatalf("no remote: got %v, %v", ok, err)
+	}
+	pushed(t, dir)
+	if ok, err := r.HasUpstream(ctx); err != nil || !ok {
 		t.Fatalf("with remote: got %v, %v", ok, err)
+	}
+}
+
+func TestRequireCommitted(t *testing.T) {
+	dir := newRepo(t)
+	r := Repo{machine.Local(), filepath.Join(dir, "sub")}
+	if err := (Repo{machine.Local(), t.TempDir()}).RequireCommitted(ctx); err == nil || !strings.Contains(err.Error(), "not a git repository") {
+		t.Errorf("no repository: err = %v", err)
+	}
+	if err := r.RequireCommitted(ctx); err == nil || !strings.Contains(err.Error(), "no upstream") {
+		t.Errorf("no upstream: err = %v", err)
+	}
+	pushed(t, dir)
+	if err := r.RequireCommitted(ctx); err != nil {
+		t.Errorf("clean: %v", err)
+	}
+	write(t, dir, "sub/a", "2") // sub/a is managed, relative to the config in sub/
+	if err := r.RequireCommitted(ctx, "a"); err != nil {
+		t.Errorf("managed change: %v", err)
+	}
+	write(t, dir, "b", "2")
+	if err := r.RequireCommitted(ctx, "a"); err == nil || !strings.Contains(err.Error(), ": b\n") {
+		t.Errorf("other change: err = %v", err)
+	}
+}
+
+func TestUnmanagedChanges(t *testing.T) {
+	dirty := []string{
+		"cfg/flake.lock",
+		"cfg/machines/h/hw.nix",
+		"cfg/hosts/nixos/h/hardware-configuration.nix",
+		"flake.lock",
+	}
+	managed := []string{"machines/h/hw.nix", "flake.lock"}
+	want := []string{"cfg/hosts/nixos/h/hardware-configuration.nix", "flake.lock"}
+	if got := unmanagedChanges(dirty, "cfg/", managed); !slices.Equal(got, want) {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if got := unmanagedChanges(dirty[:2], "cfg/", managed); len(got) != 0 {
+		t.Errorf("managed only: got %q", got)
 	}
 }
 
 func TestCommitOnlyListedPathsAndOnlyOnDiff(t *testing.T) {
 	dir := newRepo(t)
-	m := pipeline.Machine{}
+	r := Repo{machine.Local(), dir}
 	write(t, dir, "b", "2")
 	write(t, dir, "sub/a", "2")
 
-	done, err := Commit(ctx, m, dir, "msg", "sub/a")
+	done, err := r.Commit(ctx, "msg", "sub/a")
 	if err != nil || !done {
 		t.Fatalf("first: %v, %v", done, err)
 	}
-	if got, _ := Dirty(ctx, m, dir); !slices.Equal(got, []string{"b"}) {
+	if got, _ := r.Dirty(ctx); !slices.Equal(got, []string{"b"}) {
 		t.Fatalf("unlisted path was committed: dirty = %q", got)
 	}
-	done, err = Commit(ctx, m, dir, "msg", "sub/a")
+	done, err = r.Commit(ctx, "msg", "sub/a")
 	if err != nil || done {
 		t.Fatalf("second: %v, %v; want no commit", done, err)
 	}

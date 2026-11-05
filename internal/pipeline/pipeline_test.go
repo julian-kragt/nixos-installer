@@ -135,3 +135,15 @@ func TestSaveFailureFailsTheStage(t *testing.T) {
 		t.Errorf("save failure not shown to the operator:\n%s", out.String())
 	}
 }
+
+func TestNewEnvPinsNextToTheState(t *testing.T) {
+	dir := t.TempDir()
+	st, err := LoadState(dir, "atlas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := NewEnv(Inputs{Target: "192.0.2.1"}, st)
+	if env.Pin.File != filepath.Join(dir, "atlas.known_hosts") || env.Pin.Host != "atlas" {
+		t.Errorf("pin = %+v", env.Pin)
+	}
+}

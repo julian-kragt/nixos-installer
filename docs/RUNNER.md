@@ -36,13 +36,14 @@ runner.Parallel(ctx, runner.Step{Title: "A", Fn: func(ctx context.Context) error
 runner.Debug/Info/Warn/Error(ctx, "msg")
 
 // Command output (tail under the task, full text in the log file).
-// pipeline.Machine.Run already writes here.
+// machine.Machine.Run already writes here.
 runner.Output(ctx)                             // io.Writer
 
 // Questions to the operator
 line, err := runner.Ask(ctx, "Target IP address: ")
+err = runner.RequireTyped(ctx, "Type 'install': ", "install", noOperatorErr, refusedErr)
 pw, err := runner.AskSecret(ctx, "SSH password: ")                // no echo on a terminal, never logged
-i, err := runner.Choose(ctx, "Select the install disk:", items)   // numbered list, returns the index
+i, err := runner.Choose(ctx, "Select a host to install:", items) // numbered list, returns the index
 ```
 
 ## Rules

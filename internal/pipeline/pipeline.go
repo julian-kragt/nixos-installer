@@ -1,14 +1,14 @@
-// Package pipeline is the engine the stages run in: the machines they run
-// commands on, the state that survives a restart, and the loop that runs the
-// stages in order and resumes behind the last completed one.
+// Package pipeline is the engine the stages run in: the state that survives a
+// restart and the loop that runs the stages in order and resumes behind the last
+// completed one.
 package pipeline
 
 import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"slices"
 
+	"installer/internal/machine"
 	"installer/internal/runner"
 )
 
@@ -18,7 +18,6 @@ type Inputs struct {
 	Host        string // host to install: an entry of the config flake's `bootstrapEntries` output
 	Target      string // IP address of the target machine
 	ConfigDir   string // absolute path to the config flake
-	Disk        string // disk to install to; empty = detect on the target
 	SSHPassword string // root SSH password of the NixOS ISO for initial key bootstrap; prompts when empty
 }
 
@@ -28,16 +27,16 @@ type Inputs struct {
 type Env struct {
 	Inputs
 	State  *State
-	Local  Machine // the provider: the machine the installer runs on
-	Remote Machine // the target
-	Pin    HostPin // the host key Remote accepts
+	Local  machine.Machine // the provider: the machine the installer runs on
+	Remote machine.Machine // the target
+	Pin    machine.HostPin // the host key Remote accepts
 }
 
 // NewEnv returns the Env for a run: in must be complete and st loaded. The host
 // key pin lives next to the state file.
 func NewEnv(in Inputs, st *State) *Env {
-	pin := NewHostPin(filepath.Dir(st.Path()), st.Host)
-	return &Env{Inputs: in, State: st, Remote: SSH(in.Target, pin), Pin: pin}
+	pin := machine.NewHostPin(filepath.Dir(st.Path()), st.Host)
+	return &Env{Inputs: in, State: st, Local: machine.Local(), Remote: machine.SSH(in.Target, pin), Pin: pin}
 }
 
 // Stage is one step of the pipeline.
@@ -57,7 +56,7 @@ func Run(ctx context.Context, env *Env, stages []Stage) error {
 	runner.Info(ctx, "Starting pipeline")
 	for _, s := range stages {
 		title := s.ID + " " + s.Name
-		if !s.Always && slices.Contains(env.State.Completed, s.ID) {
+		if !s.Always && env.State.IsCompleted(s.ID) {
 			runner.Info(ctx, title+" (done earlier)")
 			continue
 		}

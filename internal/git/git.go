@@ -4,22 +4,34 @@ package git
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 
-	"installer/internal/pipeline"
+	"installer/internal/machine"
 )
 
-// Prefix is the path of dir below the top of its repository ("" at the top,
-// "sub/" below it). It fails when dir is not in a git repository.
-func Prefix(ctx context.Context, m pipeline.Machine, dir string) (string, error) {
-	out, err := m.Run(ctx, "git", "-C", dir, "rev-parse", "--show-prefix")
+// Repo is the git repository around Dir on Machine.
+type Repo struct {
+	Machine machine.Machine
+	Dir     string
+}
+
+func (r Repo) run(ctx context.Context, args ...string) (string, error) {
+	return r.Machine.Run(ctx, "git", append([]string{"-C", r.Dir}, args...)...)
+}
+
+// Prefix is the path of Dir below the top of its repository ("" at the top,
+// "sub/" below it). It fails when Dir is not in a git repository.
+func (r Repo) Prefix(ctx context.Context) (string, error) {
+	out, err := r.run(ctx, "rev-parse", "--show-prefix")
 	return strings.TrimSpace(out), err
 }
 
-// HasUpstream reports whether the current branch of dir tracks a remote branch.
-func HasUpstream(ctx context.Context, m pipeline.Machine, dir string) (bool, error) {
-	_, err := m.Quiet().Run(ctx, "git", "-C", dir, "rev-parse", "--abbrev-ref", "@{upstream}")
+// HasUpstream reports whether the current branch tracks a remote branch.
+func (r Repo) HasUpstream(ctx context.Context) (bool, error) {
+	_, err := r.Machine.Quiet().Run(ctx, "git", "-C", r.Dir, "rev-parse", "--abbrev-ref", "@{upstream}")
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
 		return false, nil
@@ -27,11 +39,11 @@ func HasUpstream(ctx context.Context, m pipeline.Machine, dir string) (bool, err
 	return err == nil, err
 }
 
-// Dirty returns the tracked files of dir's repository with uncommitted changes,
+// Dirty returns the tracked files of the repository with uncommitted changes,
 // as paths relative to the repository top. Untracked files are not listed:
 // a flake does not see them either.
-func Dirty(ctx context.Context, m pipeline.Machine, dir string) ([]string, error) {
-	out, err := m.Run(ctx, "git", "-C", dir, "status", "--porcelain", "-z", "--untracked-files=no")
+func (r Repo) Dirty(ctx context.Context) ([]string, error) {
+	out, err := r.run(ctx, "status", "--porcelain", "-z", "--untracked-files=no")
 	if err != nil {
 		return nil, err
 	}
@@ -60,20 +72,56 @@ func parseStatus(out string) []string {
 	return paths
 }
 
-// Add stages paths (relative to dir). A flake ignores files git does not know.
-func Add(ctx context.Context, m pipeline.Machine, dir string, paths ...string) error {
-	_, err := m.Run(ctx, "git", append([]string{"-C", dir, "add", "--"}, paths...)...)
+// RequireCommitted fails unless Dir is in a git repository whose branch has an
+// upstream and that has no uncommitted changes besides managed, the paths
+// (relative to Dir) that the installer changes itself.
+func (r Repo) RequireCommitted(ctx context.Context, managed ...string) error {
+	prefix, err := r.Prefix(ctx)
+	if err != nil {
+		return fmt.Errorf("%s is not a git repository: %w", r.Dir, err)
+	}
+	ok, err := r.HasUpstream(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("the branch of %s has no upstream; push it first (git push -u)", r.Dir)
+	}
+	dirty, err := r.Dirty(ctx)
+	if err != nil {
+		return err
+	}
+	if other := unmanagedChanges(dirty, prefix, managed); len(other) > 0 {
+		return fmt.Errorf("uncommitted changes in %s: %s\ncommit and push them first", r.Dir, strings.Join(other, ", "))
+	}
+	return nil
+}
+
+// unmanagedChanges returns the dirty paths (relative to the repository top) that
+// are not in managed (relative to prefix, where Dir sits in the repository).
+func unmanagedChanges(dirty []string, prefix string, managed []string) []string {
+	var other []string
+	for _, p := range dirty {
+		if !slices.ContainsFunc(managed, func(m string) bool { return prefix+m == p }) {
+			other = append(other, p)
+		}
+	}
+	return other
+}
+
+// add stages paths (relative to Dir). A flake ignores files git does not know.
+func (r Repo) add(ctx context.Context, paths ...string) error {
+	_, err := r.run(ctx, append([]string{"add", "--"}, paths...)...)
 	return err
 }
 
-// Commit commits exactly paths (relative to dir) with message, and only when
+// Commit commits exactly paths (relative to Dir) with message, and only when
 // they differ from HEAD. It reports whether a commit was made.
-func Commit(ctx context.Context, m pipeline.Machine, dir, message string, paths ...string) (bool, error) {
-	if err := Add(ctx, m, dir, paths...); err != nil {
+func (r Repo) Commit(ctx context.Context, message string, paths ...string) (bool, error) {
+	if err := r.add(ctx, paths...); err != nil {
 		return false, err
 	}
-	diff := append([]string{"-C", dir, "diff", "--cached", "--quiet", "--"}, paths...)
-	_, err := m.Run(ctx, "git", diff...)
+	_, err := r.run(ctx, append([]string{"diff", "--cached", "--quiet", "--"}, paths...)...)
 	var exit *exec.ExitError
 	if err == nil {
 		return false, nil // nothing to commit
@@ -81,8 +129,7 @@ func Commit(ctx context.Context, m pipeline.Machine, dir, message string, paths 
 	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
 		return false, err
 	}
-	commit := append([]string{"-C", dir, "commit", "-m", message, "--"}, paths...)
-	if _, err := m.Run(ctx, "git", commit...); err != nil {
+	if _, err := r.run(ctx, append([]string{"commit", "-m", message, "--"}, paths...)...); err != nil {
 		return false, err
 	}
 	return true, nil

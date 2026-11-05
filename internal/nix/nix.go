@@ -6,12 +6,19 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"installer/internal/pipeline"
+	"installer/internal/machine"
 )
 
-// EvalJSON runs `nix eval --json installable extra...` on m and decodes the
+// Config is the config flake at Dir, an absolute path, so nix finds the
+// repository around it. It is evaluated on Machine.
+type Config struct {
+	Machine machine.Machine
+	Dir     string
+}
+
+// evalJSON runs `nix eval --json installable extra...` on m and decodes the
 // result into out. Only stdout is decoded, so a `warning:` on stderr does no harm.
-func EvalJSON(ctx context.Context, m pipeline.Machine, installable string, out any, extra ...string) error {
+func evalJSON(ctx context.Context, m machine.Machine, installable string, out any, extra ...string) error {
 	args := append([]string{"eval", "--json", installable}, extra...)
 	stdout, err := m.Run(ctx, "nix", args...)
 	if err != nil {
@@ -23,11 +30,10 @@ func EvalJSON(ctx context.Context, m pipeline.Machine, installable string, out a
 	return nil
 }
 
-// eval evaluates attr of the config flake. config is an absolute path, so nix
-// finds the repository around it. It never writes the config's lock file.
-func eval(ctx context.Context, m pipeline.Machine, config, attr string, out any, extra ...string) error {
+// eval evaluates attr of the flake. It never writes the flake's lock file.
+func (c Config) eval(ctx context.Context, attr string, out any, extra ...string) error {
 	args := append([]string{"--no-write-lock-file"}, extra...)
-	return EvalJSON(ctx, m, config+"#"+attr, out, args...)
+	return evalJSON(ctx, c.Machine, c.Dir+"#"+attr, out, args...)
 }
 
 // HostInfo is nixos-bootstrap's installerData.<host>: the config's entry for
@@ -37,6 +43,8 @@ type HostInfo struct {
 	Users              map[string]User `json:"users"`
 	RootAuthorizedKeys []string        `json:"rootAuthorizedKeys"`
 	HardwareConfigPath string          `json:"hardwareConfigPath"`
+	// Disks holds the devices an install wipes, by disk name.
+	Disks map[string]string `json:"disks"`
 }
 
 // User is one normal user of a host. UID is nil when NixOS allocates it.
@@ -45,33 +53,24 @@ type User struct {
 	Home string `json:"home"`
 }
 
-// EvalHostInfo evaluates `installerData.<host>`.
-func EvalHostInfo(ctx context.Context, m pipeline.Machine, config, host string) (HostInfo, error) {
+// HostInfo evaluates `installerData.<host>`.
+func (c Config) HostInfo(ctx context.Context, host string) (HostInfo, error) {
 	var info HostInfo
-	err := eval(ctx, m, config, "installerData."+host, &info)
+	err := c.eval(ctx, "installerData."+host, &info)
 	return info, err
 }
 
-// ListHosts returns the hosts the config has an entry for.
-func ListHosts(ctx context.Context, m pipeline.Machine, config string) ([]string, error) {
+// Hosts returns the hosts the config has an entry for.
+func (c Config) Hosts(ctx context.Context) ([]string, error) {
 	var hosts []string
-	err := eval(ctx, m, config, "installerData", &hosts, "--apply", "builtins.attrNames")
+	err := c.eval(ctx, "installerData", &hosts, "--apply", "builtins.attrNames")
 	return hosts, err
-}
-
-// EvalDisks returns the devices of the host's disko layout, by disk name.
-// It reads the bootstrap system; installerData.<host>.disks holds the same map.
-func EvalDisks(ctx context.Context, m pipeline.Machine, config, host string) (map[string]string, error) {
-	var disks map[string]string
-	err := eval(ctx, m, config, "nixosConfigurations."+host+"-bootstrap.config.disko.devices.disk", &disks,
-		"--apply", "builtins.mapAttrs (_: d: d.device)")
-	return disks, err
 }
 
 // CheckBootstrapSystem evaluates the host's whole bootstrap system. installerData
 // only checks the entry's fields; this also runs disko's options, NixOS's
 // assertions and the hardware config.
-func CheckBootstrapSystem(ctx context.Context, m pipeline.Machine, config, host string) error {
+func (c Config) CheckBootstrapSystem(ctx context.Context, host string) error {
 	var drvPath string
-	return eval(ctx, m, config, "nixosConfigurations."+host+"-bootstrap.config.system.build.toplevel.drvPath", &drvPath)
+	return c.eval(ctx, "nixosConfigurations."+host+"-bootstrap.config.system.build.toplevel.drvPath", &drvPath)
 }
