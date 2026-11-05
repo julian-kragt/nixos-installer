@@ -61,6 +61,25 @@ func AskSecret(ctx context.Context, prompt string) (string, error) {
 	return pw, err
 }
 
+// AskSecretTwice is AskSecret for a secret that is typed twice to catch typos.
+// The first prompt stays on screen while the second is open, and both are erased
+// once answered. Comparing the answers is up to the caller.
+func AskSecretTwice(ctx context.Context, prompt, again string) (first, second string, err error) {
+	v := from(ctx)
+	if v == nil {
+		return "", "", io.EOF
+	}
+	r := v.runner
+	shown := r.beginPrompt(v.task, prompt)
+	first, err = r.readSecret(ctx)
+	if err == nil {
+		shown += "\n" + r.nextPrompt(v.task, again)
+		second, err = r.readSecret(ctx)
+	}
+	r.endPrompt(shown, "", err)
+	return first, second, err
+}
+
 // readSecret reads one line without echo. It uses term.ReadPassword when the
 // input is a terminal file; otherwise it falls back to readLine.
 func (r *Runner) readSecret(ctx context.Context) (string, error) {
@@ -109,20 +128,28 @@ func Choose(ctx context.Context, header string, items []string) (int, error) {
 // returns the question as laid out, without ANSI codes, for endPrompt.
 func (r *Runner) beginPrompt(n *node, text string) string {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.drawLocked()
 	r.suspended = true
 	if r.tty && r.cursorHidden {
 		r.write(showCursor)
 		r.cursorHidden = false
 	}
+	if n != nil && !r.tty {
+		// Nothing is rendered until a task finishes; say where we are.
+		r.write("▸ " + n.path() + "\n")
+	}
+	r.mu.Unlock()
+	return r.nextPrompt(n, text)
+}
+
+// nextPrompt prints a question inside task n while the live area is frozen and
+// returns it as laid out, without ANSI codes.
+func (r *Runner) nextPrompt(n *node, text string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	depth := 0
 	if n != nil {
 		depth = n.depth() + 1 // same indentation as log lines of this task
-		if !r.tty {
-			// Nothing is rendered until a task finishes; say where we are.
-			r.write("▸ " + n.path() + "\n")
-		}
 	}
 	plain := layoutPrompt(text, depth, "?")
 	if r.tty {

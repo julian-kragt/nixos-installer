@@ -43,6 +43,7 @@ runner.Output(ctx)                             // io.Writer
 line, err := runner.Ask(ctx, "Target IP address: ")
 err = runner.RequireTyped(ctx, "Type 'install': ", "install", noOperatorErr, refusedErr)
 pw, err := runner.AskSecret(ctx, "SSH password: ")                // no echo on a terminal, never logged
+a, b, err := runner.AskSecretTwice(ctx, "Passphrase: ", "Repeat: ")  // same, typed twice; comparing is up to the caller
 i, err := runner.Choose(ctx, "Select a host to install:", items) // numbered list, returns the index
 ```
 
@@ -63,7 +64,7 @@ i, err := runner.Choose(ctx, "Select a host to install:", items) // numbered lis
 - Output tail: 5 lines shown under a running task, dropped on success; on failure the last 20 lines are kept under the `✗`.
 - Output writer: buffers partial lines, `\r` resets the line, strips ANSI/control chars.
 - Live area taller than the terminal: header, `… N lines`, newest lines; the commit prints everything.
-- `Ask`: the live area is frozen while a question is open. On a TTY the question and the answer are erased again afterwards, so log the answer if it should stay visible. EOF with nothing typed is `io.EOF`; a last line without newline counts as an answer. Without a runner in `ctx`, or without `Options.In`, there is nobody to ask: `io.EOF`.
+- `Ask`: the live area is frozen while a question is open. On a TTY the question and the answer are erased again afterwards, so log the answer if it should stay visible. `AskSecretTwice` keeps its first prompt on screen until both are answered. EOF with nothing typed is `io.EOF`; a last line without newline counts as an answer. Without a runner in `ctx`, or without `Options.In`, there is nobody to ask: `io.EOF`.
 - Log file: `${XDG_STATE_HOME:-~/.local/state}/nixos-installer/logs/install-<time>.log`, debug level, no ANSI, format `15:12:03.501 │ Base install › Partitioning disk | message`. `main` prints `Full log: <path>` on failure.
 - GoLand's console is not a TTY and paints stderr red; enable "Emulate terminal in output console" to see the live view.
 

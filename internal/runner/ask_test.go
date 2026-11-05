@@ -230,6 +230,93 @@ func TestAskSecretReadsALineFromAPipe(t *testing.T) {
 	}
 }
 
+// askTwiceOpen starts AskSecretTwice on a pipe, answers the first prompt and
+// returns once the second is on screen. A terminal would echo only the newline.
+func askTwiceOpen(t *testing.T, h *harness, ctx context.Context) (pw *io.PipeWriter, done <-chan error) {
+	t.Helper()
+	pr, pw := io.Pipe()
+	t.Cleanup(func() { pw.Close() })
+	h.r.in = bufio.NewReader(pr)
+
+	ch := make(chan error, 1)
+	go func() {
+		_, _, err := AskSecretTwice(ctx, "First: ", "Second: ")
+		ch <- err
+	}()
+	waitFor := func(want string) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+			h.r.mu.Lock()
+			shown := strings.Contains(h.buf.String(), want)
+			h.r.mu.Unlock()
+			if shown {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%q never shown", want)
+			}
+		}
+	}
+	waitFor("First: ")
+	h.r.mu.Lock()
+	h.buf.WriteString("\n")
+	h.r.mu.Unlock()
+	io.WriteString(pw, "a\n")
+	waitFor("Second: ")
+	return pw, ch
+}
+
+func TestAskSecretTwiceKeepsFirstPromptUntilBothAnswered(t *testing.T) {
+	h := newTTY(t, 80, 24, false)
+	ctx, _ := Start(h.ctx, "Task")
+	h.r.draw()
+
+	pw, done := askTwiceOpen(t, h, ctx)
+	eq(t, squash(h.screen()), []string{"⠙ Task", "  ? First:", "  ? Second:"})
+
+	h.r.mu.Lock()
+	h.buf.WriteString("\n")
+	h.r.mu.Unlock()
+	io.WriteString(pw, "a\n")
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	eq(t, squash(h.screen()), []string{"⠹ Task"})
+}
+
+func TestAskSecretTwiceEOFLeavesNoPromptBehind(t *testing.T) {
+	h := newTTY(t, 80, 24, false)
+	ctx, _ := Start(h.ctx, "Task")
+	h.r.draw()
+
+	pw, done := askTwiceOpen(t, h, ctx)
+	pw.Close()
+	if err := <-done; err != io.EOF {
+		t.Fatalf("err = %v, want EOF", err)
+	}
+	eq(t, squash(h.screen()), []string{"⠹ Task"})
+}
+
+func TestAskSecretTwiceCancelledLeavesNoPromptBehind(t *testing.T) {
+	h := newTTY(t, 80, 24, false)
+	ctx, cancel := context.WithCancel(h.ctx)
+	ctx, _ = Start(ctx, "Task")
+	h.r.draw()
+
+	_, done := askTwiceOpen(t, h, ctx)
+	cancel()
+	if err := <-done; err != context.Canceled {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	eq(t, squash(h.screen()), []string{"⠹ Task"})
+}
+
+func TestAskSecretTwiceWithoutRunner(t *testing.T) {
+	if _, _, err := AskSecretTwice(context.Background(), "a", "b"); err != io.EOF {
+		t.Errorf("err = %v, want EOF", err)
+	}
+}
+
 func TestRequireTyped(t *testing.T) {
 	noOperator, refused := errors.New("no operator"), errors.New("refused")
 	cases := []struct {

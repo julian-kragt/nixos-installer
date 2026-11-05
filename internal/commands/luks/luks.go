@@ -43,11 +43,7 @@ func Ensure(ctx context.Context, target machine.Machine) error {
 // askPassphrase asks until two non-empty answers agree.
 func askPassphrase(ctx context.Context) (string, error) {
 	for {
-		first, err := runner.AskSecret(ctx, "LUKS passphrase: ")
-		if err != nil {
-			return "", fmt.Errorf("LUKS passphrase: %w", err)
-		}
-		second, err := runner.AskSecret(ctx, "Repeat LUKS passphrase: ")
+		first, second, err := runner.AskSecretTwice(ctx, "LUKS passphrase: ", "Repeat LUKS passphrase: ")
 		if err != nil {
 			return "", fmt.Errorf("LUKS passphrase: %w", err)
 		}
