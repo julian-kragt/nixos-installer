@@ -39,6 +39,13 @@ func put(t *testing.T, dir, name, content string) {
 // nix-secrets clone that has a pushed file of a user who left.
 func secretsEnv(t *testing.T) (*pipeline.Env, string) {
 	t.Helper()
+	return secretsEnvIn(t, "")
+}
+
+// secretsEnvIn is secretsEnv with nix-secrets in the directory sub of its git
+// repository.
+func secretsEnvIn(t *testing.T, sub string) (*pipeline.Env, string) {
+	t.Helper()
 	for k, v := range map[string]string{"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"} {
 		t.Setenv(k, v)
 	}
@@ -53,15 +60,16 @@ printf '%s' '{"users":{"jkragt":{"uid":1000,"home":"/home/jkragt"}}}'
 
 	remote := t.TempDir()
 	gitIn(t, remote, "init", "-q", "--bare", "-b", "main")
-	dir := t.TempDir()
-	gitIn(t, dir, "init", "-q", "-b", "main")
+	top := t.TempDir()
+	dir := filepath.Join(top, sub)
+	gitIn(t, top, "init", "-q", "-b", "main")
 	put(t, dir, ".sops.yaml", "keys:\n  - &host_other age1other\ncreation_rules:\n  - path_regex: ^hosts/other\\.yaml$\n    key_groups:\n      - age:\n          - *host_other\n")
 	put(t, dir, "host-users/atlas-gone.yaml", encrypted)
 	put(t, dir, "host-users/other-jkragt.yaml", encrypted)
-	gitIn(t, dir, "add", ".")
-	gitIn(t, dir, "commit", "-q", "-m", "init")
-	gitIn(t, dir, "remote", "add", "origin", remote)
-	gitIn(t, dir, "push", "-q", "-u", "origin", "main")
+	gitIn(t, top, "add", ".")
+	gitIn(t, top, "commit", "-q", "-m", "init")
+	gitIn(t, top, "remote", "add", "origin", remote)
+	gitIn(t, top, "push", "-q", "-u", "origin", "main")
 
 	env := &pipeline.Env{
 		Inputs: pipeline.Inputs{Host: "atlas", ConfigDir: t.TempDir(), SecretsDir: dir},
@@ -109,6 +117,22 @@ func TestRecipientsThenCommitPushMakeOneCommit(t *testing.T) {
 	}
 	if err := secretsRepository(ctx, env); err != nil {
 		t.Errorf("2.1 after the push: %v", err)
+	}
+}
+
+func TestCommitPushCommitsDeletionsInASubdirectory(t *testing.T) {
+	env, _ := secretsEnvIn(t, "secrets")
+	ctx := context.Background()
+	if err := recipients(ctx, env); err != nil {
+		t.Fatal(err)
+	}
+	put(t, env.SecretsDir, "hosts/atlas.yaml", encrypted)
+	put(t, env.SecretsDir, "host-users/atlas-jkragt.yaml", encrypted)
+	if err := commitPush(ctx, env); err != nil {
+		t.Fatal(err)
+	}
+	if status := gitIn(t, env.SecretsDir, "status", "--porcelain"); status != "" {
+		t.Errorf("left uncommitted: %q", status)
 	}
 }
 
