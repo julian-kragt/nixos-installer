@@ -42,7 +42,11 @@ func recipients(ctx context.Context, env *pipeline.Env) error {
 	if err := confirmReplacements(ctx, cfg.Replacements(want)); err != nil {
 		return err
 	}
-	for _, u := range cfg.Apply(want) {
+	removed, err := cfg.Apply(want)
+	if err != nil {
+		return err
+	}
+	for _, u := range removed {
 		runner.Info(ctx, "Removed the recipient of "+u+", who is no longer on "+env.Host)
 	}
 	out, err := cfg.Marshal()

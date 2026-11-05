@@ -45,6 +45,16 @@ func marshalConfig(t *testing.T, c *Config) []byte {
 	return out
 }
 
+// apply is c.Apply(h), which must succeed.
+func apply(t *testing.T, c *Config, h Host) []string {
+	t.Helper()
+	removed, err := c.Apply(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return removed
+}
+
 // golden compares got with testdata/<name>.golden, or rewrites it with -update.
 func golden(t *testing.T, name string, got []byte) {
 	t.Helper()
@@ -80,7 +90,7 @@ func TestChangedHostKey(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("replacements = %+v, want %+v", got, want)
 	}
-	if removed := c.Apply(atlas); len(removed) != 0 {
+	if removed := apply(t, c, atlas); len(removed) != 0 {
 		t.Errorf("removed = %q, want none", removed)
 	}
 	out := marshalConfig(t, c)
@@ -96,7 +106,7 @@ func TestChangedHostKey(t *testing.T) {
 
 func TestSameHostAgainChangesNothing(t *testing.T) {
 	c := fixture(t)
-	c.Apply(atlas)
+	apply(t, c, atlas)
 	first := marshalConfig(t, c)
 
 	again, err := ParseConfig(first)
@@ -106,7 +116,7 @@ func TestSameHostAgainChangesNothing(t *testing.T) {
 	if r := again.Replacements(atlas); len(r) != 0 {
 		t.Errorf("replacements = %+v, want none", r)
 	}
-	again.Apply(atlas)
+	apply(t, again, atlas)
 	if second := marshalConfig(t, again); !bytes.Equal(first, second) {
 		t.Errorf("second apply changed the file:\n%s", second)
 	}
@@ -114,13 +124,13 @@ func TestSameHostAgainChangesNothing(t *testing.T) {
 
 func TestChangedUserKey(t *testing.T) {
 	c := fixture(t)
-	c.Apply(atlas)
+	apply(t, c, atlas)
 	changed := Host{Name: "atlas", Recipient: atlasKey, Users: map[string]string{"jkragt": "age1new"}}
 	want := []Replaced{{Anchor: "user_jkragt_atlas", Old: jkragtAt, New: "age1new"}}
 	if got := c.Replacements(changed); !slices.Equal(got, want) {
 		t.Fatalf("replacements = %+v, want %+v", got, want)
 	}
-	c.Apply(changed)
+	apply(t, c, changed)
 	if r, _ := c.Recipients(UserFile("atlas", "jkragt")); !slices.Equal(r, []string{atlasKey, "age1new"}) {
 		t.Errorf("recipients = %q", r)
 	}
@@ -132,11 +142,11 @@ func TestNewHostAddedAndRemovedUser(t *testing.T) {
 	if r := c.Replacements(broadway); len(r) != 0 {
 		t.Errorf("replacements = %+v, want none", r)
 	}
-	c.Apply(broadway)
+	apply(t, c, broadway)
 	golden(t, "broadway", marshalConfig(t, c))
 
 	broadway.Users = map[string]string{"jkragt": "age1jb"}
-	removed := c.Apply(broadway)
+	removed := apply(t, c, broadway)
 	if !slices.Equal(removed, []string{"media"}) {
 		t.Errorf("removed = %q, want [media]", removed)
 	}
@@ -150,8 +160,8 @@ func TestNewHostAddedAndRemovedUser(t *testing.T) {
 
 func TestSameUserOnTwoHosts(t *testing.T) {
 	c := fixture(t)
-	c.Apply(atlas)
-	c.Apply(Host{Name: "broadway", Recipient: "age1broadway", Users: map[string]string{"jkragt": "age1jb"}})
+	apply(t, c, atlas)
+	apply(t, c, Host{Name: "broadway", Recipient: "age1broadway", Users: map[string]string{"jkragt": "age1jb"}})
 	for file, want := range map[string][]string{
 		UserFile("atlas", "jkragt"):    {atlasKey, jkragtAt},
 		UserFile("broadway", "jkragt"): {"age1broadway", "age1jb"},
@@ -164,8 +174,8 @@ func TestSameUserOnTwoHosts(t *testing.T) {
 
 func TestRuleOfAHostWithALongerNameIsNotTouched(t *testing.T) {
 	c := fixture(t)
-	c.Apply(Host{Name: "atlas-dev", Recipient: "age1dev", Users: map[string]string{"x": "age1x"}})
-	if removed := c.Apply(Host{Name: "atlas", Recipient: atlasKey}); slices.Contains(removed, "dev-x") {
+	apply(t, c, Host{Name: "atlas-dev", Recipient: "age1dev", Users: map[string]string{"x": "age1x"}})
+	if removed := apply(t, c, Host{Name: "atlas", Recipient: atlasKey}); slices.Contains(removed, "dev-x") {
 		t.Errorf("removed = %q, took atlas-dev's user for atlas'", removed)
 	}
 	if _, err := c.Recipients(UserFile("atlas-dev", "x")); err != nil {
@@ -178,7 +188,7 @@ func TestNewRuleGoesBeforeACatchAll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.Apply(Host{Name: "atlas", Recipient: atlasKey})
+	apply(t, c, Host{Name: "atlas", Recipient: atlasKey})
 	if got, err := c.Recipients(HostFile("atlas")); err != nil || !slices.Equal(got, []string{atlasKey}) {
 		t.Errorf("recipients = %q, %v; the catch-all shadows the new rule", got, err)
 	}
@@ -193,12 +203,58 @@ func TestEmptyConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.Apply(atlas)
+	apply(t, c, atlas)
 	golden(t, "empty", marshalConfig(t, c))
 }
 
 func TestRecipientsOfAnUncoveredFile(t *testing.T) {
 	if _, err := fixture(t).Recipients("hosts/nowhere.yaml"); err == nil || !strings.Contains(err.Error(), "no creation rule") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// sops uses the first rule that matches a file, so the host's rule must come
+// before any broader rule, wherever it was.
+func TestHostRuleGoesBeforeABroaderRule(t *testing.T) {
+	const broad = "  - path_regex: ^hosts/.*\\.yaml$\n    key_groups:\n      - age:\n          - *admin\n"
+	const noRegex = "  - key_groups:\n      - age:\n          - *admin\n"
+	const own = "  - path_regex: ^hosts/atlas\\.yaml$\n    key_groups:\n      - age:\n          - *host_atlas\n"
+	for name, rules := range map[string]string{
+		"anchored broad rule":        broad,
+		"rule without path_regex":    noRegex,
+		"own rule after a broad one": broad + own,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := ParseConfig([]byte("keys:\n  - &admin age1admin\n  - &host_atlas age1old\ncreation_rules:\n" + rules))
+			if err != nil {
+				t.Fatal(err)
+			}
+			apply(t, c, atlas)
+			for file, want := range map[string][]string{
+				HostFile("atlas"):           {atlasKey},
+				UserFile("atlas", "jkragt"): {atlasKey, jkragtAt},
+			} {
+				if got, err := c.Recipients(file); err != nil || !slices.Equal(got, want) {
+					t.Errorf("%s: recipients = %q, %v, want %q", file, got, err, want)
+				}
+			}
+			again, err := ParseConfig(marshalConfig(t, c))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := again.Recipients(HostFile("atlas")); err != nil || !slices.Equal(got, []string{atlasKey}) {
+				t.Errorf("after a round trip: recipients = %q, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestApplyReportsABrokenRegex(t *testing.T) {
+	c, err := ParseConfig([]byte("creation_rules:\n  - path_regex: ^hosts/(\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Apply(atlas); err == nil || !strings.Contains(err.Error(), "path_regex") {
+		t.Errorf("err = %v, want the broken path_regex named", err)
 	}
 }

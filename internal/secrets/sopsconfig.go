@@ -100,16 +100,21 @@ func (c *Config) Replacements(h Host) []Replaced {
 }
 
 // Apply makes c say exactly h about h's files: the anchors with their
-// recipients, one rule per file with exactly its recipients. Rules and anchors
-// of users no longer on the host are removed; it returns those users, sorted.
-// An anchor that a rule of another host still uses stays.
-func (c *Config) Apply(h Host) []string {
+// recipients, one rule per file with exactly its recipients, which sops uses
+// for that file. Rules and anchors of users no longer on the host are removed;
+// it returns those users, sorted. An anchor that a rule of another host still
+// uses stays.
+func (c *Config) Apply(h Host) ([]string, error) {
 	for _, a := range h.anchors() {
 		c.setKey(a.name, a.recipient)
 	}
-	c.setRule(HostRule(h.Name), HostAnchor(h.Name))
+	if err := c.setRule(HostFile(h.Name), HostRule(h.Name), HostAnchor(h.Name)); err != nil {
+		return nil, err
+	}
 	for _, u := range slices.Sorted(maps.Keys(h.Users)) {
-		c.setRule(UserRule(h.Name, u), HostAnchor(h.Name), UserAnchor(h.Name, u))
+		if err := c.setRule(UserFile(h.Name, u), UserRule(h.Name, u), HostAnchor(h.Name), UserAnchor(h.Name, u)); err != nil {
+			return nil, err
+		}
 	}
 
 	var removed []string
@@ -123,29 +128,25 @@ func (c *Config) Apply(h Host) []string {
 		}
 		removed = append(removed, u)
 	}
-	return removed
+	return removed, nil
 }
 
-// Recipients returns the recipients of the rule sops uses for file, the first
-// whose path_regex matches it.
+// Recipients returns the recipients of the rule sops uses for file: the first
+// that matches it.
 func (c *Config) Recipients(file string) ([]string, error) {
 	for _, rule := range c.seq("creation_rules").Content {
-		regex := value(rule, "path_regex")
-		if regex == nil {
-			continue
-		}
-		re, err := regexp.Compile(regex.Value)
+		ok, err := matches(rule, file)
 		if err != nil {
-			return nil, fmt.Errorf("%s: path_regex %q: %w", ConfigFile, regex.Value, err)
+			return nil, err
 		}
-		if !re.MatchString(file) {
+		if !ok {
 			continue
 		}
 		var out []string
 		for _, alias := range ageAliases(rule) {
 			r, ok := c.Key(alias)
 			if !ok {
-				return nil, fmt.Errorf("%s: rule %q uses *%s, which is not a key", ConfigFile, regex.Value, alias)
+				return nil, fmt.Errorf("%s: the rule for %s uses *%s, which is not a key", ConfigFile, file, alias)
 			}
 			out = append(out, r)
 		}
@@ -181,26 +182,40 @@ func (c *Config) removeKey(anchor string) {
 	keys.Content = slices.DeleteFunc(keys.Content, func(k *yaml.Node) bool { return k.Anchor == anchor })
 }
 
-// setRule makes the rule for regex list exactly anchors, in one age key group.
-// A missing rule goes before the first catch-all, because sops uses the first
-// rule that matches. A rule that already says this is left as it is.
-func (c *Config) setRule(regex string, anchors ...string) {
+// setRule makes the rule for regex, which matches file, list exactly anchors,
+// in one age key group. sops uses the first rule that matches a file, so the
+// rule goes before any other that matches file: a missing one there or at the
+// end, an existing one moved there. A rule that already says this is left as
+// it is.
+func (c *Config) setRule(file, regex string, anchors ...string) error {
 	rules := c.seq("creation_rules")
-	groups := keyGroups(anchors)
-	if i := c.ruleIndex(regex); i >= 0 {
-		if !slices.Equal(ageAliases(rules.Content[i]), anchors) || len(value(rules.Content[i], "key_groups").Content) != 1 {
-			setValue(rules.Content[i], "key_groups", groups)
+	i := c.ruleIndex(regex)
+	var rule *yaml.Node
+	if i >= 0 {
+		rule = rules.Content[i]
+		if !slices.Equal(ageAliases(rule), anchors) || len(value(rule, "key_groups").Content) != 1 {
+			setValue(rule, "key_groups", keyGroups(anchors))
 		}
-		return
+		rules.Content = slices.Delete(rules.Content, i, i+1)
+	} else {
+		rule = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		setValue(rule, "path_regex", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: regex})
+		setValue(rule, "key_groups", keyGroups(anchors))
+		i = len(rules.Content)
 	}
-	rule := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	setValue(rule, "path_regex", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: regex})
-	setValue(rule, "key_groups", groups)
-	at := slices.IndexFunc(rules.Content, isCatchAll)
-	if at < 0 {
-		at = len(rules.Content)
+	at := i
+	for j, r := range rules.Content[:i] {
+		ok, err := matches(r, file)
+		if err != nil {
+			return err
+		}
+		if ok {
+			at = j
+			break
+		}
 	}
 	rules.Content = slices.Insert(rules.Content, at, rule)
+	return nil
 }
 
 func (c *Config) removeRule(regex string) {
@@ -313,9 +328,16 @@ func ageAliases(rule *yaml.Node) []string {
 	return out
 }
 
-// isCatchAll reports whether rule may match files of any host: it has no
-// path_regex, or one that is not anchored at the start.
-func isCatchAll(rule *yaml.Node) bool {
+// matches reports whether sops takes rule for file: its path_regex matches
+// file, or it has none and so matches every file.
+func matches(rule *yaml.Node, file string) (bool, error) {
 	v := value(rule, "path_regex")
-	return v == nil || !strings.HasPrefix(v.Value, "^")
+	if v == nil {
+		return true, nil
+	}
+	re, err := regexp.Compile(v.Value)
+	if err != nil {
+		return false, fmt.Errorf("%s: path_regex %q: %w", ConfigFile, v.Value, err)
+	}
+	return re.MatchString(file), nil
 }

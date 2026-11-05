@@ -53,7 +53,9 @@ func newRepo(t *testing.T, recipient string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Apply(secrets.Host{Name: "atlas", Recipient: recipient, Users: map[string]string{"jkragt": recipient}})
+	if _, err := cfg.Apply(secrets.Host{Name: "atlas", Recipient: recipient, Users: map[string]string{"jkragt": recipient}}); err != nil {
+		t.Fatal(err)
+	}
 	data, err := cfg.Marshal()
 	if err != nil {
 		t.Fatal(err)
