@@ -4,8 +4,8 @@
 package stages
 
 import (
-	"installer/internal/git"
-	"installer/internal/nix"
+	"installer/internal/commands/git"
+	"installer/internal/commands/nix"
 	"installer/internal/pipeline"
 )
 

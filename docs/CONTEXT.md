@@ -125,10 +125,11 @@ internal/machine/        running commands on a machine, and trusting and logging
                          access.go          Access: check the host key, set up key login; agent keys
                          authorized_keys.go InstallAuthorizedKeys: install the provider's keys on the target with the root password
                          hostkey.go         HostPin, ScanHostKey, WaitForNewHostKey: the one SSH host key trusted for a host
-internal/nix/            Config: nix eval of <config>#installerData, hosts, the bootstrap system
-internal/git/            Repo: prefix, upstream, dirty paths, commit, RequireCommitted
-internal/luks/           the LUKS passphrase on the target
-internal/nixosanywhere/  run nixos-anywhere, tell what a target runs
+internal/commands/       the commands the stages run, one package each
+                         nix/           Config: nix eval of <config>#installerData, hosts, the bootstrap system
+                         git/           Repo: prefix, upstream, dirty paths, commit, RequireCommitted
+                         luks/          the LUKS passphrase on the target
+                         nixosanywhere/ run nixos-anywhere, tell what a target runs
 internal/stages/         one file per stage, which orchestrates; nothing else
                          stages.go    All: the ordered stage list
                          00_environment_preparation.go
@@ -149,7 +150,7 @@ Three kinds of data, kept apart:
 1. `internal/stages/<nn>_<name>.go` with `func <name>(ctx context.Context, env *pipeline.Env) error`. Sub-steps are `runner.Run` / `runner.Parallel`; commands are `env.Local.Run(ctx, "nix", …)` and `env.Remote.Run(ctx, "lsblk", …)`; secrets go through `RunStdin`, never through args.
 2. One entry in `stages.All`, at its place in the order.
 3. A fact a later run needs becomes a field on `pipeline.State`. A new flag becomes a field on `pipeline.Inputs` and a line in `flags.go`.
-4. A stage file orchestrates what happens in that stage and holds no complex code: the stage function plus flat glue, meaning straight-line calls and messages. Parsing, polling, retry loops and protocol details go in a package under `internal/`, even when one stage uses them. A tool (`nix eval`, `git`, `sops`) gets a package named after the tool, with a type bound to a `machine.Machine` (`nix.Config`, `git.Repo`). `internal/stages` holds stage files only.
+4. A stage file orchestrates what happens in that stage and holds no complex code: the stage function plus flat glue, meaning straight-line calls and messages. Parsing, polling, retry loops and protocol details go in a package under `internal/`, even when one stage uses them. A command (`nix eval`, `git`, `sops`) gets a package named after it under `internal/commands/`, with a type bound to a `machine.Machine` (`nix.Config`, `git.Repo`). `internal/stages` holds stage files only.
 
 ### Conventions
 
@@ -210,6 +211,6 @@ The numbers are the ones the roadmap and the stage prompts refer to. The roadmap
 - **Stage IDs**: strings matching the Pipeline (`"0.1"`, `"2.3"`…); the order is the order of `stages.All`; resume = skip what is in `State.Completed`.
 - **Machines**: `machine.Machine` runs a command locally or through the system `ssh`, with stderr streamed to the runner, stdin for secrets (`RunStdin`) and `Quiet()` for commands that print secrets. Still to add with the stage that needs it: an interactive mode (`ssh -t`, attach the terminal, stop the spinner first) for vim.
 - **Host key**: `machine.HostPin` keeps one key per host in `<state dir>/<host>.known_hosts`, and `machine.SSH` and `InstallAuthorizedKeys` accept only that key. nixos-anywhere cannot be given the pin (ROADMAP "Plumbing design", Host key). Stage 3.2 runs `nixos-rebuild` on the target, so it needs no ssh options from here.
-- **Tool helpers**: `internal/nix`, `internal/git`, `internal/luks` and `internal/nixosanywhere` exist. To add, each in its own package (§4): `sops`, `nixos-rebuild`. Do ssh→age conversion and `.sops.yaml` editing in-process.
+- **Tool helpers**: `internal/commands/nix`, `internal/commands/git`, `internal/commands/luks` and `internal/commands/nixosanywhere` exist. To add, each in its own package (§4): `sops`, `nixos-rebuild`. Do ssh→age conversion and `.sops.yaml` editing in-process.
 - **CLI** (`cmd/nixos-installer/flags.go`, `inputs.go`): `--target` (prompted when empty; IPv4, IPv6, or link-local IPv6 with zone such as `fe80::1%eth0`), `--host` (picked from the config's `bootstrapEntries` output when empty), `--config` (prompted when empty), `--ssh-password` (the ISO's root password for the first key install; prompted when key auth fails, it is empty and the target offers password login), `--verbose`. Planned: `install --host --target` (full) and `secrets --host --target` (Phase 2–3 resume, as in Pipeline 4.2, by filtering `stages.All`).
 - **Secrets hygiene**: never put secrets in argv or logs (the bash script followed this — keep it), always `umask 077` on target, cleanup in a deferred step even on failure.

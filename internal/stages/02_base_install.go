@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"installer/internal/luks"
+	"installer/internal/commands/luks"
+	"installer/internal/commands/nix"
+	"installer/internal/commands/nixosanywhere"
 	"installer/internal/machine"
-	"installer/internal/nix"
-	"installer/internal/nixosanywhere"
 	"installer/internal/pipeline"
 	"installer/internal/runner"
 )

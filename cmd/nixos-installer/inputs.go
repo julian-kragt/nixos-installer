@@ -11,8 +11,8 @@ import (
 	"slices"
 	"strings"
 
+	"installer/internal/commands/nix"
 	"installer/internal/machine"
-	"installer/internal/nix"
 	"installer/internal/pipeline"
 	"installer/internal/runner"
 )

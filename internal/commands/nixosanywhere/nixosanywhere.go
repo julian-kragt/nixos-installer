@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"installer/internal/git"
+	"installer/internal/commands/git"
 	"installer/internal/machine"
 )
 
