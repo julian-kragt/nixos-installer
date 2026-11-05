@@ -138,3 +138,26 @@ func TestSecretsRepositoryRefusesUnrelatedChanges(t *testing.T) {
 		t.Errorf("err = %v, want the unrelated change named", err)
 	}
 }
+
+func TestUserIdentityOutdatedWhenTheUsersChange(t *testing.T) {
+	env, _ := secretsEnv(t)
+	tests := []struct {
+		name       string
+		recorded   map[string]string
+		wantReason string
+	}{
+		{"same users", map[string]string{"jkragt": "age1jkragt"}, ""},
+		{"user removed from the host", map[string]string{"jkragt": "age1jkragt", "gone": "age1gone"}, "the users of atlas are jkragt, the recorded ones gone, jkragt"},
+		{"user added to the host", nil, "the users of atlas are jkragt, the recorded ones none"},
+		{"recipient missing", map[string]string{"jkragt": ""}, "no recipient is recorded for jkragt"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env.State.UserRecipients = tt.recorded
+			reason, err := userIdentityOutdated(context.Background(), env)
+			if err != nil || reason != tt.wantReason {
+				t.Errorf("reason = %q, %v, want %q", reason, err, tt.wantReason)
+			}
+		})
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"slices"
+	"strings"
 
 	"installer/internal/commands/hostidentity"
 	"installer/internal/pipeline"
@@ -35,4 +36,32 @@ func userIdentity(ctx context.Context, env *pipeline.Env) error {
 	}
 	env.State.UserRecipients = recipients
 	return nil
+}
+
+// userIdentityOutdated asks for 1.3 again when the host's users are not the
+// ones whose recipients are recorded, so the secrets stages after it follow
+// a user added to or removed from the host.
+func userIdentityOutdated(ctx context.Context, env *pipeline.Env) (string, error) {
+	users, err := hostUsers(ctx, env)
+	if err != nil {
+		return "", err
+	}
+	recorded := slices.Sorted(maps.Keys(env.State.UserRecipients))
+	if !slices.Equal(users, recorded) {
+		return "the users of " + env.Host + " are " + list(users) + ", the recorded ones " + list(recorded), nil
+	}
+	for _, u := range users {
+		if !strings.HasPrefix(env.State.UserRecipients[u], "age1") {
+			return "no recipient is recorded for " + u, nil
+		}
+	}
+	return "", nil
+}
+
+// list is names for a message: comma-separated, or "none".
+func list(names []string) string {
+	if len(names) == 0 {
+		return "none"
+	}
+	return strings.Join(names, ", ")
 }

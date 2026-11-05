@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"strings"
 
 	"installer/internal/commands/hostidentity"
 	"installer/internal/pipeline"
@@ -20,4 +21,12 @@ func hostIdentity(ctx context.Context, env *pipeline.Env) error {
 		runner.Info(ctx, "Host recipient: "+recipient)
 		return nil
 	})
+}
+
+// hostIdentityOutdated asks for 1.1 again when no host recipient is recorded.
+func hostIdentityOutdated(_ context.Context, env *pipeline.Env) (string, error) {
+	if !strings.HasPrefix(env.State.HostRecipient, "age1") {
+		return "no host recipient is recorded", nil
+	}
+	return "", nil
 }

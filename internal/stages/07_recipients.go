@@ -25,7 +25,7 @@ func recipients(ctx context.Context, env *pipeline.Env) error {
 	for _, u := range users {
 		r, ok := env.State.UserRecipients[u]
 		if !ok {
-			return fmt.Errorf("no age key is recorded for %s; stage 1.3 must run again", u)
+			return fmt.Errorf("no age key is recorded for %s", u)
 		}
 		want.Users[u] = r
 	}

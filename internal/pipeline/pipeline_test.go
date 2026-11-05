@@ -147,3 +147,61 @@ func TestNewEnvPinsNextToTheState(t *testing.T) {
 		t.Errorf("pin = %+v", env.Pin)
 	}
 }
+
+func TestOutdatedStageRunsAgainWithEveryStageAfterIt(t *testing.T) {
+	var ran []string
+	dir := t.TempDir()
+	stale := ""
+	check := fake("0.2", &ran)
+	check.Outdated = func(context.Context, *Env) (string, error) { return stale, nil }
+	stages := []Stage{fake("0.1", &ran), check, fake("0.3", &ran)}
+	if _, _, err := run(t, dir, stages...); err != nil {
+		t.Fatal(err)
+	}
+
+	ran = nil
+	if _, _, err := run(t, dir, stages...); err != nil {
+		t.Fatal(err)
+	}
+	if len(ran) != 0 {
+		t.Fatalf("ran %s, want nothing while 0.2 is up to date", strings.Join(ran, ","))
+	}
+
+	ran, stale = nil, "users changed"
+	st, out, err := run(t, dir, stages...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(ran, ","); got != "0.2,0.3" {
+		t.Fatalf("ran %s, want 0.2,0.3", got)
+	}
+	if got := strings.Join(st.Completed, ","); got != "0.1,0.2,0.3" {
+		t.Fatalf("completed %s, want each stage once", got)
+	}
+	if !strings.Contains(out, "0.2 stage 0.2 must run again: users changed") {
+		t.Errorf("reason not shown:\n%s", out)
+	}
+}
+
+func TestOutdatedStageStaysOpenWhenALaterStageFails(t *testing.T) {
+	var ran []string
+	dir := t.TempDir()
+	check := fake("0.1", &ran)
+	stages := []Stage{check, fake("0.2", &ran)}
+	if _, _, err := run(t, dir, stages...); err != nil {
+		t.Fatal(err)
+	}
+
+	check.Outdated = func(context.Context, *Env) (string, error) { return "changed", nil }
+	bad := Stage{ID: "0.2", Name: "bad", Run: func(context.Context, *Env) error { return errors.New("boom") }}
+	if _, _, err := run(t, dir, check, bad); err == nil {
+		t.Fatal("want the failure of 0.2")
+	}
+	saved, err := LoadState(dir, "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(saved.Completed, ","); got != "0.1" {
+		t.Fatalf("saved completed %s, want 0.1: 0.2 must run again next time", got)
+	}
+}

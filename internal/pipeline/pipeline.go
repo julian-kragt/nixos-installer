@@ -51,18 +51,33 @@ type Stage struct {
 	// before (e.g. environment checks). It is not recorded in State.Completed.
 	Always bool
 	Run    func(ctx context.Context, env *Env) error
+	// Outdated, when set, says why a completed stage must run again because
+	// what it recorded no longer holds, or "" when it need not.
+	Outdated func(ctx context.Context, env *Env) (string, error)
 }
 
 // Run runs the stages in the given order. A stage in State.Completed is
-// skipped; every other stage is recorded there when it succeeds and the state
-// is saved, so the next invocation resumes behind it.
+// skipped unless it is outdated; every other stage is recorded there when it
+// succeeds and the state is saved, so the next invocation resumes behind it.
+// An outdated stage and every stage after it are no longer completed: they
+// build on what it recorded.
 func Run(ctx context.Context, env *Env, stages []Stage) error {
 	runner.Info(ctx, "Starting pipeline")
-	for _, s := range stages {
+	for i, s := range stages {
 		title := s.ID + " " + s.Name
 		if !s.Always && env.State.IsCompleted(s.ID) {
-			runner.Info(ctx, title+" (done earlier)")
-			continue
+			reason, err := outdated(ctx, env, s)
+			if err != nil {
+				return fmt.Errorf("%s: %w", title, err)
+			}
+			if reason == "" {
+				runner.Info(ctx, title+" (done earlier)")
+				continue
+			}
+			runner.Info(ctx, title+" must run again: "+reason)
+			if err := env.State.Reopen(stageIDs(stages[i:])...); err != nil {
+				return fmt.Errorf("persist state: %w", err)
+			}
 		}
 		err := runner.Run(ctx, title, func(ctx context.Context) error {
 			return runStage(ctx, env, s)
@@ -72,6 +87,22 @@ func Run(ctx context.Context, env *Env, stages []Stage) error {
 		}
 	}
 	return nil
+}
+
+// outdated is s.Outdated, or "" for a stage without it.
+func outdated(ctx context.Context, env *Env, s Stage) (string, error) {
+	if s.Outdated == nil {
+		return "", nil
+	}
+	return s.Outdated(ctx, env)
+}
+
+func stageIDs(stages []Stage) []string {
+	ids := make([]string, len(stages))
+	for i, s := range stages {
+		ids[i] = s.ID
+	}
+	return ids
 }
 
 // runStage runs s and records it as completed.

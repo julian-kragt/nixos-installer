@@ -58,6 +58,13 @@ func RemoveState(dir, host string) error {
 // IsCompleted reports whether the stage with this ID is done.
 func (s *State) IsCompleted(id string) bool { return slices.Contains(s.Completed, id) }
 
+// Reopen drops ids from the completed stages and saves s, so they run again
+// even when this run stops before them.
+func (s *State) Reopen(ids ...string) error {
+	s.Completed = slices.DeleteFunc(s.Completed, func(id string) bool { return slices.Contains(ids, id) })
+	return s.Save()
+}
+
 // Path is the file s is saved to.
 func (s *State) Path() string { return s.path }
 

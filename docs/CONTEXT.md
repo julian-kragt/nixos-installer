@@ -142,7 +142,7 @@ internal/stages/         one file per stage, which orchestrates; nothing else
                          02_base_install.go … 09_commit_push.go
 ```
 
-How a run goes: `main` parses the flags into `pipeline.Inputs`, `resolveInputs` asks for the missing target and host and loads `<state dir>/<host>.json`, then `pipeline.Run(ctx, env, stages.All)` runs the stages in list order. A stage whose ID is in `State.Completed` is skipped; every other stage is recorded and the state saved when it succeeds. A stage with `Always: true` (0.0) runs every time and is never recorded.
+How a run goes: `main` parses the flags into `pipeline.Inputs`, `resolveInputs` asks for the missing target and host and loads `<state dir>/<host>.json`, then `pipeline.Run(ctx, env, stages.All)` runs the stages in list order. A stage whose ID is in `State.Completed` is skipped; every other stage is recorded and the state saved when it succeeds. A completed stage with an `Outdated` check runs again when the check gives a reason: it and every stage after it are first removed from `Completed` and the state saved, so a run that stops on the way still runs them next time. 1.1 is outdated without a recorded host recipient, 1.3 when the config's users are not the ones whose recipients are recorded, so a user added to or removed from the host runs the secrets phase again. A stage with `Always: true` (0.0) runs every time and is never recorded.
 
 Three kinds of data, kept apart:
 
@@ -212,7 +212,7 @@ The numbers are the ones the roadmap and the stage prompts refer to. The roadmap
 ## 7. Direction for the Go code
 
 - **State**: `pipeline.State`, JSON per host in `~/.local/state/nixos-installer/<host>.json`, saved after every stage. Has `Host`, `Completed`, `HostRecipient`. To add as stages need them (no user list: stages read `installerData.<host>` themselves, see ROADMAP "Plumbing design"): `UserRecipients map[string]string`, `SecretsCommit`, `ConfigRev`. The secrets repo is an input (`--secrets`), not state. No phase marker: `Completed` says whether 1.2 and 3.3 are done (ROADMAP "Plumbing design", Phase).
-- **Stage IDs**: strings matching the Pipeline (`"0.1"`, `"2.3"`…); the order is the order of `stages.All`; resume = skip what is in `State.Completed`.
+- **Stage IDs**: strings matching the Pipeline (`"0.1"`, `"2.3"`…); the order is the order of `stages.All`; resume = skip what is in `State.Completed`, unless the stage's `Outdated` check says it must run again.
 - **Machines**: `machine.Machine` runs a command locally or through the system `ssh`, with stderr streamed to the runner, stdin for secrets (`RunStdin`) and `Quiet()` for commands that print secrets. Still to add with the stage that needs it: agent forwarding (`WithAgent()`, 3.2). No interactive mode over ssh; vim runs on the provider through `runner.Hand`.
 - **Host key**: `machine.HostPin` keeps one key per host in `<state dir>/<host>.known_hosts`, and `machine.SSH` and `InstallAuthorizedKeys` accept only that key. nixos-anywhere cannot be given the pin (ROADMAP "Plumbing design", Host key). Stage 3.2 runs `nixos-rebuild` on the target, so it needs no ssh options from here.
 - **Tool helpers**: `internal/commands/nix`, `internal/commands/git`, `internal/commands/luks`, `internal/commands/nixosanywhere` and `internal/commands/hostidentity` exist. To add, each in its own package (§4): `sops` (encrypt on the provider, check on the target), `nixos-rebuild`. Do `.sops.yaml` editing in-process.
