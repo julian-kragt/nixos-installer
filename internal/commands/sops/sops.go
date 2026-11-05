@@ -41,20 +41,35 @@ func (r Repo) Encrypt(ctx context.Context, file string, doc []byte) error {
 // ErrCannotDecrypt means the key on the target does not decrypt the file.
 var ErrCannotDecrypt = errors.New("the target's key does not decrypt it")
 
-// undecryptable is the exit code of fields when sops cannot decrypt.
-const undecryptable = 3
+// The exit codes of fields when it cannot classify every value.
+const (
+	undecryptable = 3 // sops cannot retrieve the data key with the age key (its exit 128)
+	unreadableKey = 4 // the age key file cannot be read
+	sopsFailed    = 5 // sops failed otherwise; its exit code is printed
+	unextractable = 6 // sops cannot extract a path; the classes before it are printed
+)
 
 // fields decrypts each path in $2… of the sops file on stdin with the age key
 // in $1 and prints the class of its value, one line per path, by the rules of
-// secrets.Classify. The ciphertext goes to a temp file, as sops decrypts once
-// per path; each value stays in a shell variable and only meets builtins.
+// secrets.Classify. The whole file is decrypted first, to tell a key that
+// does not decrypt it from other failures. The ciphertext goes to a temp file,
+// as sops decrypts once per path; each value stays in a shell variable and
+// only meets builtins. sops' messages are dropped: they could hold a value.
 const fields = `f=$(mktemp) || exit 1
 trap 'rm -f "$f"' EXIT
 cat > "$f"
 key=$1
 shift
+test -r "$key" || exit 4
+SOPS_AGE_KEY_FILE="$key" sops decrypt --input-type yaml --output-type yaml "$f" >/dev/null 2>&1
+rc=$?
+case $rc in
+0) ;;
+128) exit 3 ;;
+*) echo "$rc"; exit 5 ;;
+esac
 for p in "$@"; do
-	v=$(SOPS_AGE_KEY_FILE="$key" sops decrypt --input-type yaml --output-type yaml --extract "$p" "$f" 2>/dev/null) || exit 3
+	v=$(SOPS_AGE_KEY_FILE="$key" sops decrypt --input-type yaml --output-type yaml --extract "$p" "$f" 2>/dev/null) || exit 6
 	case $v in
 	*[Cc][Hh][Aa][Nn][Gg][Ee]_[Mm][Ee]* | *[Cc][Hh][Aa][Nn][Gg][Ee][Mm][Ee]*) echo placeholder ;;
 	'') echo empty ;;
@@ -77,12 +92,8 @@ func Fields(ctx context.Context, target machine.Machine, keyFile string, ciphert
 		args = append(args, p.Extract())
 	}
 	out, err := target.Quiet().RunStdin(ctx, bytes.NewReader(ciphertext), "sh", args...)
-	var exit *exec.ExitError
-	if errors.As(err, &exit) && exit.ExitCode() == undecryptable {
-		return nil, ErrCannotDecrypt
-	}
 	if err != nil {
-		return nil, fmt.Errorf("decrypt on the target: %w", err)
+		return nil, fieldsError(err, keyFile, strings.Fields(out), paths)
 	}
 	classes := strings.Fields(out)
 	if len(classes) != len(paths) {
@@ -93,6 +104,30 @@ func Fields(ctx context.Context, target machine.Machine, keyFile string, ciphert
 		fs[i] = secrets.Field{Path: p, Class: secrets.Class(classes[i])}
 	}
 	return fs, nil
+}
+
+// fieldsError says why fields failed, from its exit code and what it printed.
+func fieldsError(err error, keyFile string, printed []string, paths []secrets.Path) error {
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		return fmt.Errorf("decrypt on the target: %w", err)
+	}
+	switch exit.ExitCode() {
+	case undecryptable:
+		return ErrCannotDecrypt
+	case unreadableKey:
+		return fmt.Errorf("decrypt on the target: cannot read the age key %s", keyFile)
+	case sopsFailed:
+		if len(printed) == 1 && printed[0] == "127" {
+			return errors.New("decrypt on the target: sops is not installed there")
+		}
+		return fmt.Errorf("decrypt on the target: sops failed (exit %s)", strings.Join(printed, " "))
+	case unextractable:
+		if len(printed) < len(paths) {
+			return fmt.Errorf("decrypt on the target: sops cannot extract %s", paths[len(printed)])
+		}
+	}
+	return fmt.Errorf("decrypt on the target: %w", err)
 }
 
 // leafPaths returns the paths of the values in a sops file, without its metadata.

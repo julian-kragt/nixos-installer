@@ -51,13 +51,16 @@ type Leaf struct {
 }
 
 // Leaves returns the leaves below the mapping m, in file order. A key that
-// sops' --extract cannot address is an error.
+// sops cannot encrypt or its --extract cannot address is an error.
 func Leaves(m *yaml.Node) ([]Leaf, error) {
 	var out []Leaf
 	var walk func(m *yaml.Node, prefix Path) error
 	walk = func(m *yaml.Node, prefix Path) error {
 		for i := 0; i+1 < len(m.Content); i += 2 {
 			k, v := m.Content[i].Value, m.Content[i+1]
+			if m.Content[i].ShortTag() != "!!str" {
+				return fmt.Errorf("key %s under %q: sops takes only string keys; quote it", k, prefix.String())
+			}
 			if k == "" || strings.ContainsAny(k, `"]\`) {
 				return fmt.Errorf("key %q under %q: keys cannot be empty or hold \", ] or \\", k, prefix.String())
 			}

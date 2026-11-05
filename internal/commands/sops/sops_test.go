@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -126,6 +127,46 @@ func TestFieldsWithAnotherKey(t *testing.T) {
 	}
 	if _, err := Fields(context.Background(), machine.Loopback(), otherKey, ciphertext); !errors.Is(err, ErrCannotDecrypt) {
 		t.Errorf("err = %v, want ErrCannotDecrypt", err)
+	}
+}
+
+func TestFieldsWithoutTheKeyFile(t *testing.T) {
+	needTools(t)
+	_, recipient := newKey(t, t.TempDir())
+	dir := newRepo(t, recipient)
+	file := secrets.HostFile("atlas")
+	if err := (Repo{machine.Local(), dir}).Encrypt(context.Background(), file, []byte("placeholder: unused\n")); err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := os.ReadFile(filepath.Join(dir, file))
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(t.TempDir(), "key.txt")
+	_, err = Fields(context.Background(), machine.Loopback(), missing, ciphertext)
+	if err == nil || errors.Is(err, ErrCannotDecrypt) || !strings.Contains(err.Error(), missing) {
+		t.Errorf("err = %v, want the unreadable key file named", err)
+	}
+}
+
+func TestFieldsErrorNamesTheCause(t *testing.T) {
+	paths := []secrets.Path{{"a"}, {"db", "password"}}
+	tests := []struct {
+		code    int
+		printed []string
+		want    string
+	}{
+		{undecryptable, nil, ErrCannotDecrypt.Error()},
+		{sopsFailed, []string{"127"}, "sops is not installed there"},
+		{sopsFailed, []string{"2"}, "sops failed (exit 2)"},
+		{unextractable, []string{"value"}, "cannot extract db.password"},
+		{1, nil, "exit status 1"},
+	}
+	for _, tt := range tests {
+		err := exec.Command("sh", "-c", "exit "+strconv.Itoa(tt.code)).Run()
+		if got := fieldsError(err, "/key", tt.printed, paths); got == nil || !strings.Contains(got.Error(), tt.want) {
+			t.Errorf("exit %d, printed %q: err = %v, want %q", tt.code, tt.printed, got, tt.want)
+		}
 	}
 }
 

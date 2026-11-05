@@ -51,10 +51,17 @@ empty: {}
 		t.Errorf("passwords = %v", got)
 	}
 
-	for _, bad := range []string{"", "- a\n", "a: 1\n\"x\\\"y\": 2\n", "a:\n  b]: c\n"} {
+	for _, bad := range []string{"", "- a\n", "a: 1\n\"x\\\"y\": 2\n", "a:\n  b]: c\n", "0: a\n", "a:\n  true: b\n"} {
 		if _, err := ParseTemplate([]byte(bad)); err == nil {
 			t.Errorf("%q: want an error", bad)
 		}
+	}
+}
+
+func TestQuotedKeyThatLooksLikeANumber(t *testing.T) {
+	tmpl, err := ParseTemplate([]byte("\"0\": a\n"))
+	if err != nil || len(tmpl.Keys) != 1 || tmpl.Keys[0].Path.String() != "0" {
+		t.Errorf("keys = %+v, %v; want the quoted key 0", tmpl, err)
 	}
 }
 

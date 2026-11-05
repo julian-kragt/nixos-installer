@@ -63,7 +63,8 @@ func (m Machine) HasCommand(ctx context.Context, name string) bool {
 // Run runs a command and returns its stdout. Stderr is streamed to the runner
 // task in ctx unless m is quiet. A command that cannot be started or exits
 // non-zero is an error that ends with the last line of stderr; it wraps
-// *exec.ExitError for callers that need the exit code.
+// *exec.ExitError for callers that need the exit code, and comes with what
+// the command printed on stdout until then.
 func (m Machine) Run(ctx context.Context, name string, args ...string) (string, error) {
 	return m.RunStdin(ctx, nil, name, args...)
 }
@@ -86,9 +87,9 @@ func (m Machine) RunStdin(ctx context.Context, stdin io.Reader, name string, arg
 
 	if err := process.Run(); err != nil {
 		if last := lastLine(stderr.String()); last != "" && !m.quiet {
-			return "", fmt.Errorf("%s: %w: %s", name, err, last)
+			return stdout.String(), fmt.Errorf("%s: %w: %s", name, err, last)
 		}
-		return "", fmt.Errorf("%s: %w", name, err)
+		return stdout.String(), fmt.Errorf("%s: %w", name, err)
 	}
 	return stdout.String(), nil
 }
