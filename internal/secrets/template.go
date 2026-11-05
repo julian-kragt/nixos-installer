@@ -83,7 +83,7 @@ type Kind int
 
 const (
 	Literal  Kind = iota // the template's value, kept unless the operator edits it
-	Secret               // a placeholder the operator replaces in the editor
+	Secret               // a placeholder or empty value the operator replaces in the editor
 	Password             // asked with a prompt, stored as a crypt hash
 )
 
@@ -100,7 +100,8 @@ type Template struct {
 }
 
 // ParseTemplate reads a template. A leaf named hashedPassword is a password; a
-// leaf holding change_me or CHANGEME is a secret; any other leaf is a literal.
+// leaf holding change_me or CHANGEME, or nothing, is a secret; any other leaf
+// is a literal.
 func ParseTemplate(data []byte) (*Template, error) {
 	root, err := parseMapping(data)
 	if err != nil {
@@ -116,7 +117,7 @@ func ParseTemplate(data []byte) (*Template, error) {
 		switch {
 		case l.Path[len(l.Path)-1] == passwordKey:
 			k.Kind = Password
-		case Classify(text(l.Node)) == ClassPlaceholder:
+		case slices.Contains([]Class{ClassPlaceholder, ClassEmpty}, Classify(text(l.Node))):
 			k.Kind = Secret
 		}
 		t.Keys = append(t.Keys, k)
@@ -155,7 +156,7 @@ func (t *Template) Content() *yaml.Node {
 // says what to do. Comments are not kept in the file.
 func (t *Template) Buffer(file string) ([]byte, error) {
 	m := t.Content()
-	m.HeadComment = "Secrets for " + file + ". Replace every change_me / CHANGEME.\n" +
+	m.HeadComment = "Secrets for " + file + ". Replace every change_me / CHANGEME and fill in every empty value.\n" +
 		"Save and quit (:wq) to encrypt, or :cq to abort. Comments are not kept.\n" +
 		"Passwords are asked for separately."
 	return marshal(m)

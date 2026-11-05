@@ -58,6 +58,24 @@ empty: {}
 	}
 }
 
+// An empty value cannot be kept, so the operator fills it in.
+func TestEmptyTemplateValueIsASecret(t *testing.T) {
+	tmpl, err := ParseTemplate([]byte("domain: \"\"\nnothing:\nkept: x\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []TemplateKey{{Path: Path{"domain"}, Kind: Secret}, {Path: Path{"nothing"}, Kind: Secret}, {Path: Path{"kept"}, Kind: Literal}}
+	if !slices.EqualFunc(tmpl.Keys, want, func(a, b TemplateKey) bool { return a.Path.equal(b.Path) && a.Kind == b.Kind }) {
+		t.Errorf("keys = %+v\nwant %+v", tmpl.Keys, want)
+	}
+	if !tmpl.NeedsEditor() {
+		t.Error("NeedsEditor = false, want true")
+	}
+	if _, err := tmpl.CheckEdited([]byte("domain: \"\"\nnothing: y\nkept: x\n")); err == nil || !strings.Contains(err.Error(), "domain is empty") {
+		t.Errorf("err = %v, want domain is empty", err)
+	}
+}
+
 func TestQuotedKeyThatLooksLikeANumber(t *testing.T) {
 	tmpl, err := ParseTemplate([]byte("\"0\": a\n"))
 	if err != nil || len(tmpl.Keys) != 1 || tmpl.Keys[0].Path.String() != "0" {
