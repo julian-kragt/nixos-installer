@@ -46,10 +46,23 @@ func secretsRepo(env *pipeline.Env) git.Repo {
 	return git.Repo{Machine: env.Local, Dir: env.SecretsDir}
 }
 
+// hostInfo returns the config's entry for the host, evaluated once per run.
+// 0.1 and 0.2 evaluate it themselves: 0.1 may change the config.
+func hostInfo(ctx context.Context, env *pipeline.Env) (nix.HostInfo, error) {
+	if env.HostInfo == nil {
+		info, err := configFlake(env).HostInfo(ctx, env.Host)
+		if err != nil {
+			return nix.HostInfo{}, err
+		}
+		env.HostInfo = &info
+	}
+	return *env.HostInfo, nil
+}
+
 // hostUsers returns the normal users of the host, sorted, as the config defines
 // them. The list is read on every run, never stored.
 func hostUsers(ctx context.Context, env *pipeline.Env) ([]string, error) {
-	info, err := configFlake(env).HostInfo(ctx, env.Host)
+	info, err := hostInfo(ctx, env)
 	if err != nil {
 		return nil, err
 	}

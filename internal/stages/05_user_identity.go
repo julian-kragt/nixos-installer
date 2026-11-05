@@ -15,12 +15,16 @@ import (
 // target and records the recipients, for the secrets stages. A user who is no
 // longer on the host drops out of the record.
 func userIdentity(ctx context.Context, env *pipeline.Env) error {
-	info, err := configFlake(env).HostInfo(ctx, env.Host)
+	info, err := hostInfo(ctx, env)
 	if err != nil {
 		return err
 	}
-	recipients := make(map[string]string, len(info.Users))
-	for _, user := range slices.Sorted(maps.Keys(info.Users)) {
+	users, err := hostUsers(ctx, env)
+	if err != nil {
+		return err
+	}
+	recipients := make(map[string]string, len(users))
+	for _, user := range users {
 		err := runner.Run(ctx, "Ensure age key of "+user, func(ctx context.Context) error {
 			recipient, err := hostidentity.UserRecipient(ctx, env.Remote, user, info.Users[user].Home)
 			if err != nil {
