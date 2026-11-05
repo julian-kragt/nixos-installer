@@ -5,12 +5,34 @@ package secrets
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 )
 
 // ConfigFile is the sops configuration at the top of the repository.
 const ConfigFile = ".sops.yaml"
+
+// userName is a user name the layout keeps apart from any other: no dashes,
+// so host-users/<host>-<user>.yaml names one host and user, and no regex
+// syntax, so a rule of a host whose name starts like host's is never read as
+// one of host's.
+var userName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+
+// CheckNames fails unless the names of host and its users keep every file,
+// rule and anchor of the layout apart: a user name matches userName, and a
+// host name has no underscore, so user_<user>_<host> names one host and user.
+func CheckNames(host string, users []string) error {
+	if host == "" || strings.ContainsAny(host, "_/") {
+		return fmt.Errorf("host %q: the nix-secrets layout needs a host name without _ or /", host)
+	}
+	for _, u := range users {
+		if !userName.MatchString(u) {
+			return fmt.Errorf("user %q on %s: the nix-secrets layout needs a user name of lowercase letters, digits and _, not starting with a digit", u, host)
+		}
+	}
+	return nil
+}
 
 // HostFile is the host's own secret file, relative to the repository.
 func HostFile(host string) string { return "hosts/" + host + ".yaml" }
@@ -37,7 +59,7 @@ func FileUser(host, path string) (string, bool) {
 		return "", false
 	}
 	user, ok := strings.CutSuffix(rest, ".yaml")
-	return user, ok && user != "" && !strings.ContainsAny(user, "-/")
+	return user, ok && userName.MatchString(user)
 }
 
 // Stale returns the user files of host in the repository at dir that belong

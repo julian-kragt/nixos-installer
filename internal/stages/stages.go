@@ -11,6 +11,7 @@ import (
 	"installer/internal/commands/git"
 	"installer/internal/commands/nix"
 	"installer/internal/pipeline"
+	"installer/internal/secrets"
 )
 
 // stageBaseInstall is the ID of the stage after which the target's system must
@@ -60,11 +61,16 @@ func hostInfo(ctx context.Context, env *pipeline.Env) (nix.HostInfo, error) {
 }
 
 // hostUsers returns the normal users of the host, sorted, as the config defines
-// them. The list is read on every run, never stored.
+// them. The list is read on every run, never stored. It fails when a name
+// does not fit the nix-secrets layout.
 func hostUsers(ctx context.Context, env *pipeline.Env) ([]string, error) {
 	info, err := hostInfo(ctx, env)
 	if err != nil {
 		return nil, err
 	}
-	return slices.Sorted(maps.Keys(info.Users)), nil
+	users := slices.Sorted(maps.Keys(info.Users))
+	if err := secrets.CheckNames(env.Host, users); err != nil {
+		return nil, err
+	}
+	return users, nil
 }

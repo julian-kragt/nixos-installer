@@ -26,10 +26,34 @@ func TestFileUser(t *testing.T) {
 		{"host-users/broadway-jkragt.yaml", "", false},
 		{"hosts/atlas.yaml", "", false},
 		{"host-users/atlas-.yaml", "", false},
+		{"host-users/atlas-John.yaml", "", false},
 	}
 	for _, tt := range tests {
 		if user, ok := FileUser("atlas", tt.path); user != tt.user && tt.ok || ok != tt.ok {
 			t.Errorf("%s: got %q, %v, want %q, %v", tt.path, user, ok, tt.user, tt.ok)
+		}
+	}
+}
+
+func TestCheckNames(t *testing.T) {
+	tests := []struct {
+		host  string
+		users []string
+		ok    bool
+	}{
+		{"atlas", []string{"jkragt", "media_1", "_svc"}, true},
+		{"atlas-dev", []string{"jkragt"}, true},
+		// host-users/atlas-john-doe.yaml would also be atlas-john's file of doe.
+		{"atlas", []string{"john-doe"}, false},
+		// user_a_b_c would also be the anchor of a on b_c.
+		{"b_c", []string{"a"}, false},
+		{"atlas", []string{"John"}, false},
+		{"atlas", []string{"1st"}, false},
+		{"", nil, false},
+	}
+	for _, tt := range tests {
+		if err := CheckNames(tt.host, tt.users); (err == nil) != tt.ok {
+			t.Errorf("%s %q: err = %v, want ok = %v", tt.host, tt.users, err, tt.ok)
 		}
 	}
 }

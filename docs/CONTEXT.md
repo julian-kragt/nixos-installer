@@ -7,7 +7,7 @@ Checked against the repos on 2026-11-03.
 ## Decisions so far
 
 - **The Go installer replaces `install-host.sh` entirely.** The script and the `just install | enroll-sops | deploy-remote` recipes are removed from nixos-config, so until the installer is complete there is no other install path. The script stays the reference to port from: `git -C ../nixos-config show 06dd040:scripts/install-host.sh`. Line numbers in the prompts refer to that revision.
-- **nix-secrets is a setup only and is not in use** (§3). The installer targets its layout, `hosts/<host>.yaml` and `host-users/<host>-<user>.yaml`, and does not need to support anything older.
+- **nix-secrets is a setup only and is not in use** (§3). The installer targets its layout, `hosts/<host>.yaml` and `host-users/<host>-<user>.yaml`, and does not need to support anything older. So that every file, rule and anchor names one host and user, the secrets stages refuse a user name with a dash, uppercase or a leading digit (`^[a-z_][a-z0-9_]*$`) and a host name with `_` (`secrets.CheckNames`).
 
 ---
 

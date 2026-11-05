@@ -239,11 +239,6 @@ func (c *Config) uses(anchor string) bool {
 	})
 }
 
-// userName is what a user file's rule may name: a user name without dashes or
-// regex syntax, so a rule of a host whose name starts like host's is never read
-// as one of host's.
-var userName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
-
 // ruleUsers returns the users that have a rule for a file of host and whose
 // rule lists the host's key.
 func (c *Config) ruleUsers(host string) []string {
