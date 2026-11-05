@@ -24,6 +24,7 @@ func parseFlags(args []string, stderr io.Writer) (options, error) {
 	fs.SetOutput(stderr)
 	fs.BoolVar(&o.verbose, "verbose", false, "Enable verbose logging")
 	fs.StringVar(&o.ConfigDir, "config", "", "Path to the config flake (prompts when empty)")
+	fs.StringVar(&o.SecretsDir, "secrets", "", "Path to the nix-secrets repository (prompts when empty)")
 	fs.StringVar(&o.Host, "host", "", "Host to install (prompts when empty)")
 	fs.StringVar(&o.Target, "target", "", "IP address of the target device (prompts when empty)")
 	fs.StringVar(&o.SSHPassword, "ssh-password", "", "Root SSH password of the NixOS ISO for the initial key bootstrap (prompts when empty)")

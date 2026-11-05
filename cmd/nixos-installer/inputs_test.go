@@ -43,6 +43,16 @@ func newConfig(t *testing.T, hosts ...string) string {
 	return dir
 }
 
+// newSecrets creates a nix-secrets directory.
+func newSecrets(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".sops.yaml"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func TestAskTarget(t *testing.T) {
 	ctx, out := operator("nope\n\n10.0.0.5\n")
 	got, err := askTarget(ctx, "")
@@ -79,6 +89,27 @@ func TestAskConfigDir(t *testing.T) {
 		t.Errorf("asked: got %q, %v", got, err)
 	}
 	if !strings.Contains(out.String(), "no flake.nix") {
+		t.Errorf("bad answer not explained: %q", out.String())
+	}
+}
+
+func TestAskSecretsDir(t *testing.T) {
+	dir := newSecrets(t)
+	ctx, _ := operator("")
+	if got, err := askSecretsDir(ctx, dir); err != nil || got != dir {
+		t.Errorf("given secrets: got %q, %v", got, err)
+	}
+	if _, err := askSecretsDir(ctx, t.TempDir()); err == nil || !strings.Contains(err.Error(), "no .sops.yaml") {
+		t.Errorf("given secrets without .sops.yaml: err = %v", err)
+	}
+	if _, err := askSecretsDir(ctx, ""); err == nil || !strings.Contains(err.Error(), "--secrets") {
+		t.Errorf("EOF: err = %v, want a hint at --secrets", err)
+	}
+	ctx, out := operator(t.TempDir() + "\n" + dir + "\n")
+	if got, err := askSecretsDir(ctx, ""); err != nil || got != dir {
+		t.Errorf("asked: got %q, %v", got, err)
+	}
+	if !strings.Contains(out.String(), "no .sops.yaml") {
 		t.Errorf("bad answer not explained: %q", out.String())
 	}
 }
@@ -136,13 +167,14 @@ func TestResolveInputsCompletesInputsAndLoadsState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, _ := operator("\n192.168.1.100\n2\n") // Enter, target, host
+	secretsDir := newSecrets(t)
+	ctx, _ := operator("\n192.168.1.100\n" + secretsDir + "\n2\n") // Enter, target, secrets, host
 	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas", "broadway")}
 	st, err := resolveInputs(ctx, &in, stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if in.Target != "192.168.1.100" || in.Host != "broadway" {
+	if in.Target != "192.168.1.100" || in.Host != "broadway" || in.SecretsDir != secretsDir {
 		t.Errorf("inputs: %+v", in)
 	}
 	if st.Host != "broadway" || len(st.Completed) != 1 {
@@ -152,7 +184,7 @@ func TestResolveInputsCompletesInputsAndLoadsState(t *testing.T) {
 
 func TestResolveInputsFromFlagsAsksNothing(t *testing.T) {
 	ctx, _ := operator("")
-	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas"), Host: "atlas", Target: "192.168.1.100"}
+	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas"), SecretsDir: newSecrets(t), Host: "atlas", Target: "192.168.1.100"}
 	st, err := resolveInputs(ctx, &in, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +210,7 @@ func TestResolveInputsReinstallStartsOver(t *testing.T) {
 	}
 
 	ctx, _ := operator("")
-	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas"), Host: "atlas", Target: "192.168.1.100", Reinstall: true}
+	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas"), SecretsDir: newSecrets(t), Host: "atlas", Target: "192.168.1.100", Reinstall: true}
 	st, err := resolveInputs(ctx, &in, stateDir)
 	if err != nil {
 		t.Fatal(err)

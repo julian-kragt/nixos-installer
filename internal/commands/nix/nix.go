@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"installer/internal/machine"
 )
@@ -34,6 +35,15 @@ func evalJSON(ctx context.Context, m machine.Machine, installable string, out an
 func (c Config) eval(ctx context.Context, attr string, out any, extra ...string) error {
 	args := append([]string{"--no-write-lock-file"}, extra...)
 	return evalJSON(ctx, c.Machine, c.Dir+"#"+attr, out, args...)
+}
+
+// Features returns the experimental features nix has enabled on m.
+func Features(ctx context.Context, m machine.Machine) ([]string, error) {
+	out, err := m.Run(ctx, "nix", "config", "show", "experimental-features")
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(out), nil
 }
 
 // HostInfo is nixos-bootstrap's installerData.<host>: the config's entry for

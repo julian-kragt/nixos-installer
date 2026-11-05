@@ -53,6 +53,13 @@ func (m Machine) Quiet() Machine {
 	return m
 }
 
+// HasCommand reports whether name is a command on m. A machine that cannot be
+// reached has none.
+func (m Machine) HasCommand(ctx context.Context, name string) bool {
+	_, err := m.Quiet().Run(ctx, "sh", "-c", `command -v "$1" >/dev/null`, "sh", name)
+	return err == nil
+}
+
 // Run runs a command and returns its stdout. Stderr is streamed to the runner
 // task in ctx unless m is quiet. A command that cannot be started or exits
 // non-zero is an error that ends with the last line of stderr; it wraps

@@ -125,3 +125,13 @@ func TestSSHArgv(t *testing.T) {
 		}
 	}
 }
+
+func TestHasCommand(t *testing.T) {
+	m := Loopback()
+	if !m.HasCommand(context.Background(), "sh") {
+		t.Error("sh: want found")
+	}
+	if m.HasCommand(context.Background(), "no-such-command-here") {
+		t.Error("no-such-command-here: want not found")
+	}
+}

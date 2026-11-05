@@ -17,7 +17,7 @@ import (
 	"installer/internal/runner"
 )
 
-// resolveInputs asks for whatever the flags left empty (target, config, host) and
+// resolveInputs asks for whatever the flags left empty (target, config, secrets, host) and
 // loads the persisted state of the chosen host, since state is keyed by host
 // name, after deleting it when in.Reinstall is set. in is completed in place.
 func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*pipeline.State, error) {
@@ -34,6 +34,10 @@ func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*
 		if err != nil {
 			return err
 		}
+		secretsDir, err := askSecretsDir(ctx, in.SecretsDir)
+		if err != nil {
+			return err
+		}
 		hosts, err := listHosts(ctx, configDir)
 		if err != nil {
 			return err
@@ -42,7 +46,7 @@ func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*
 		if err != nil {
 			return err
 		}
-		in.Target, in.ConfigDir, in.Host = target, configDir, host
+		in.Target, in.ConfigDir, in.SecretsDir, in.Host = target, configDir, secretsDir, host
 
 		if in.Reinstall {
 			if err := pipeline.RemoveState(stateDir, host); err != nil {
@@ -84,12 +88,27 @@ func askConfigDir(ctx context.Context, dir string) (string, error) {
 	return askUntil(ctx, "Path to the config flake", "--config", checkConfigDir)
 }
 
-// checkConfigDir returns the absolute path of dir, with a leading ~ expanded, if
-// it holds a flake.nix.
-func checkConfigDir(dir string) (string, error) {
+// checkConfigDir returns the absolute path of dir if it holds a flake.nix.
+func checkConfigDir(dir string) (string, error) { return dirWith(dir, "flake.nix") }
+
+// askSecretsDir returns dir, or asks for the nix-secrets repository until it
+// holds a .sops.yaml when dir is empty.
+func askSecretsDir(ctx context.Context, dir string) (string, error) {
+	if dir != "" {
+		return checkSecretsDir(dir)
+	}
+	return askUntil(ctx, "Path to the nix-secrets repository", "--secrets", checkSecretsDir)
+}
+
+// checkSecretsDir returns the absolute path of dir if it holds a .sops.yaml.
+func checkSecretsDir(dir string) (string, error) { return dirWith(dir, ".sops.yaml") }
+
+// dirWith returns the absolute path of dir, with a leading ~ expanded, if it
+// holds file.
+func dirWith(dir, file string) (string, error) {
 	dir = expandHome(dir)
-	if _, err := os.Stat(filepath.Join(dir, "flake.nix")); dir == "" || err != nil {
-		return "", fmt.Errorf("%q has no flake.nix", dir)
+	if _, err := os.Stat(filepath.Join(dir, file)); dir == "" || err != nil {
+		return "", fmt.Errorf("%q has no %s", dir, file)
 	}
 	return filepath.Abs(dir)
 }

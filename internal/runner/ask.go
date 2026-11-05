@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 
@@ -122,6 +123,41 @@ func Choose(ctx context.Context, header string, items []string) (int, error) {
 		return 0, fmt.Errorf("invalid selection %q", line)
 	}
 	return n - 1, nil
+}
+
+// ErrNoTerminal means there is no terminal to hand to an interactive program.
+var ErrNoTerminal = errors.New("this needs the installer to run in a terminal")
+
+// Hand gives the terminal to fn, which runs an interactive program such as an
+// editor on in and out. The live area is frozen and the cursor shown while fn
+// runs, and drawn again afterwards; a full-screen program restores the screen
+// when it exits. Without a terminal, or without a runner in ctx: ErrNoTerminal.
+func Hand(ctx context.Context, fn func(in, out *os.File) error) error {
+	v := from(ctx)
+	if v == nil || v.runner.inFile == nil || !v.runner.tty {
+		return ErrNoTerminal
+	}
+	r := v.runner
+	out, ok := r.out.(*os.File)
+	if !ok {
+		return ErrNoTerminal
+	}
+	r.mu.Lock()
+	r.drawLocked()
+	r.suspended = true
+	if r.cursorHidden {
+		r.write(showCursor)
+		r.cursorHidden = false
+	}
+	r.mu.Unlock()
+
+	err := fn(r.inFile, out)
+
+	r.mu.Lock()
+	r.suspended = false
+	r.drawLocked()
+	r.mu.Unlock()
+	return err
 }
 
 // beginPrompt freezes the live area and prints the question inside task n. It

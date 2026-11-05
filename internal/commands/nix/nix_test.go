@@ -115,3 +115,29 @@ func TestCheckBootstrapSystem(t *testing.T) {
 		t.Errorf("args = %q, want %q", args(), want)
 	}
 }
+
+func TestFeatures(t *testing.T) {
+	tests := []struct {
+		name, out string
+		want      []string
+	}{
+		{"one line", "nix-command flakes pipe-operators\n", []string{"nix-command", "flakes", "pipe-operators"}},
+		{"none", "\n", nil},
+		{"extra spaces", "  flakes   nix-command", []string{"flakes", "nix-command"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := fakeNix(t, tt.out)
+			got, err := Features(context.Background(), machine.Loopback())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("features = %q, want %q", got, tt.want)
+			}
+			if want := []string{"config", "show", "experimental-features"}; !slices.Equal(args(), want) {
+				t.Errorf("args = %q, want %q", args(), want)
+			}
+		})
+	}
+}

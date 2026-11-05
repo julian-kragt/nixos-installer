@@ -37,7 +37,7 @@ func environmentPreparation(ctx context.Context, env *pipeline.Env) error {
 }
 
 func checkLocalTools(context.Context) error {
-	for _, tool := range []string{"ssh", "git"} {
+	for _, tool := range []string{"ssh", "git", "sops", "mkpasswd", "vim"} {
 		if _, err := exec.LookPath(tool); err != nil {
 			return fmt.Errorf("%s not found in PATH", tool)
 		}

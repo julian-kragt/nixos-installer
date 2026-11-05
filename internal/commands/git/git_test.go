@@ -150,6 +150,27 @@ func TestCommitOnlyListedPathsAndOnlyOnDiff(t *testing.T) {
 	}
 }
 
+func TestCommitADeletion(t *testing.T) {
+	dir := newRepo(t)
+	r := Repo{machine.Local(), dir}
+	before, err := r.Head(ctx)
+	if err != nil || len(before) != 40 {
+		t.Fatalf("head = %q, %v", before, err)
+	}
+	if err := os.Remove(filepath.Join(dir, "b")); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := r.Commit(ctx, "msg", "b"); err != nil || !done {
+		t.Fatalf("commit: %v, %v", done, err)
+	}
+	if after, _ := r.Head(ctx); after == before {
+		t.Error("HEAD did not move")
+	}
+	if got, _ := r.Dirty(ctx); len(got) != 0 {
+		t.Errorf("dirty = %q, want the deletion committed", got)
+	}
+}
+
 // pushFrom makes a commit in a second clone of dir's remote, so dir falls behind.
 func pushFrom(t *testing.T, dir string) {
 	t.Helper()

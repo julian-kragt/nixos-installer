@@ -16,6 +16,13 @@ import (
 type State struct {
 	Host      string
 	Completed []string // IDs of the stages that are done
+	// HostRecipient is the age recipient of the target's own age key.
+	HostRecipient string
+	// UserRecipients maps each user on the host to the recipient of their own
+	// age key on the target.
+	UserRecipients map[string]string `json:",omitempty"`
+	// SecretsCommit is the nix-secrets commit with the host's secrets.
+	SecretsCommit string `json:",omitempty"`
 
 	path string
 }

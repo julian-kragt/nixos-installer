@@ -139,6 +139,12 @@ func (r Repo) Add(ctx context.Context, paths ...string) error {
 	return err
 }
 
+// Head returns the commit HEAD points at.
+func (r Repo) Head(ctx context.Context) (string, error) {
+	out, err := r.run(ctx, "rev-parse", "HEAD")
+	return strings.TrimSpace(out), err
+}
+
 // Push pushes the current branch to its upstream.
 func (r Repo) Push(ctx context.Context) error {
 	if _, err := r.run(ctx, "push"); err != nil {

@@ -29,18 +29,22 @@
             version = self.shortRev or self.dirtyShortRev or "dev";
             src = self;
 
-            vendorHash = "sha256-dVtheik9hgc8Ig52xOR7v1ujtqj2bzV1+gl5KmKBB98=";
+            vendorHash = "sha256-+BWPX4u+EBCABeyjszTew6WmKBfrRhhA5TnatJVkPTU=";
 
             nativeBuildInputs = [ pkgs.makeWrapper ];
 
-            # ssh and git are shelled out to at runtime. nix itself is taken from
-            # the operator's PATH so it matches their daemon.
+            # ssh, git, and for the secrets phase sops, mkpasswd and vim, are
+            # shelled out to at runtime. nix itself is taken from the operator's PATH so
+            # it matches their daemon.
             postInstall = ''
               wrapProgram $out/bin/nixos-installer \
                 --suffix PATH : ${
                   pkgs.lib.makeBinPath [
                     pkgs.openssh
                     pkgs.git
+                    pkgs.sops
+                    pkgs.mkpasswd
+                    pkgs.vim
                   ]
                 }
             '';
@@ -62,6 +66,10 @@
             pkgs.gotools
             pkgs.openssh
             pkgs.git
+            pkgs.sops
+            pkgs.mkpasswd
+            pkgs.vim
+            pkgs.age # tests encrypt with a throwaway key
           ];
         };
       });

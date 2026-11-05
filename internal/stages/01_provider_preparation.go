@@ -98,7 +98,7 @@ func checkDisks(ctx context.Context, target machine.Machine, host string, device
 // checkTarget checks what the base install needs on the target ISO.
 func checkTarget(ctx context.Context, target machine.Machine) error {
 	for _, tool := range []string{"nix", "lsblk", "curl"} {
-		if _, err := target.Run(ctx, "sh", "-c", `command -v "$1" >/dev/null`, "sh", tool); err != nil {
+		if !target.HasCommand(ctx, tool) {
 			return fmt.Errorf("%s is missing on the target", tool)
 		}
 	}

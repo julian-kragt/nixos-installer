@@ -336,3 +336,48 @@ func TestRequireTyped(t *testing.T) {
 		}
 	}
 }
+
+func TestHandWithoutTerminal(t *testing.T) {
+	if err := Hand(context.Background(), func(_, _ *os.File) error { return nil }); !errors.Is(err, ErrNoTerminal) {
+		t.Errorf("no runner: err = %v, want ErrNoTerminal", err)
+	}
+	ui := New(Options{Out: io.Discard, In: strings.NewReader("")})
+	defer ui.Close()
+	called := false
+	err := Hand(NewContext(context.Background(), ui), func(_, _ *os.File) error { called = true; return nil })
+	if !errors.Is(err, ErrNoTerminal) || called {
+		t.Errorf("piped input: err = %v, called = %v; want ErrNoTerminal without calling", err, called)
+	}
+}
+
+func TestHandFreezesTheLiveAreaWhileTheProgramRuns(t *testing.T) {
+	out, err := os.CreateTemp(t.TempDir(), "tty")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	r := newRunner(Options{Out: out}, true, func() (int, int) { return 80, 24 })
+	r.inFile = os.Stdin
+	r.cursorHidden = true
+	ctx := NewContext(context.Background(), r)
+
+	var during bool
+	err = Hand(ctx, func(in, o *os.File) error {
+		r.mu.Lock()
+		during = r.suspended && !r.cursorHidden
+		r.mu.Unlock()
+		if in != os.Stdin || o != out {
+			t.Error("fn did not get the runner's terminal")
+		}
+		return errors.New("from fn")
+	})
+	if err == nil || err.Error() != "from fn" {
+		t.Errorf("err = %v, want fn's error", err)
+	}
+	if !during {
+		t.Error("live area not frozen, or cursor hidden, while fn ran")
+	}
+	if r.suspended {
+		t.Error("live area still frozen after fn")
+	}
+}

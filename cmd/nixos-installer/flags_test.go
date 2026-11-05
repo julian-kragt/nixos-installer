@@ -15,6 +15,9 @@ func TestParseFlags(t *testing.T) {
 	if o.Target != "192.168.1.100" || o.Host != "atlas" || o.ConfigDir != "" || !o.verbose || o.Reinstall || o.GenerateHardware {
 		t.Fatalf("got %+v", o)
 	}
+	if o, err := parseFlags([]string{"--secrets", "../nix-secrets"}, &buf); err != nil || o.SecretsDir != "../nix-secrets" {
+		t.Fatalf("--secrets: %+v %v", o, err)
+	}
 	if o, err := parseFlags([]string{"--generate-hardware"}, &buf); err != nil || !o.GenerateHardware {
 		t.Fatalf("--generate-hardware: %+v %v", o, err)
 	}

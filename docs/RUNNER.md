@@ -45,6 +45,9 @@ err = runner.RequireTyped(ctx, "Type 'install': ", "install", noOperatorErr, ref
 pw, err := runner.AskSecret(ctx, "SSH password: ")                // no echo on a terminal, never logged
 a, b, err := runner.AskSecretTwice(ctx, "Passphrase: ", "Repeat: ")  // same, typed twice; comparing is up to the caller
 i, err := runner.Choose(ctx, "Select a host to install:", items) // numbered list, returns the index
+
+// Handing the terminal to an interactive program (vim in 2.3)
+err = runner.Hand(ctx, func(in, out *os.File) error { ... })      // live area frozen meanwhile; ErrNoTerminal without a TTY
 ```
 
 ## Rules
@@ -75,4 +78,4 @@ i, err := runner.Choose(ctx, "Select a host to install:", items) // numbered lis
 
 Tests build a Runner with `newRunner(opts, tty, size)`, a fake clock (`r.now`) and call `r.draw()` directly (see `runner_test.go` for the fake terminal; `ask_test.go` for an open question).
 
-Not built yet (design leaves room): full plain/CI mode, handing the terminal to an interactive command (`ssh -t`).
+Not built yet (design leaves room): full plain/CI mode.
