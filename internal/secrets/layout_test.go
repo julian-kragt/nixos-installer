@@ -50,6 +50,13 @@ func TestCheckNames(t *testing.T) {
 		{"atlas", []string{"John"}, false},
 		{"atlas", []string{"1st"}, false},
 		{"", nil, false},
+		// A glob of atlas* would match other hosts' files.
+		{"atlas*", nil, false},
+		{"web[1]", nil, false},
+		// &host_a,b is not a YAML anchor.
+		{"a,b", nil, false},
+		{"-atlas", nil, false},
+		{"Atlas2", nil, true},
 	}
 	for _, tt := range tests {
 		if err := CheckNames(tt.host, tt.users); (err == nil) != tt.ok {
@@ -58,7 +65,7 @@ func TestCheckNames(t *testing.T) {
 	}
 }
 
-func TestStaleAndManaged(t *testing.T) {
+func TestStale(t *testing.T) {
 	dir := t.TempDir()
 	for _, f := range []string{"atlas-jkragt", "atlas-gone", "atlas-dev-jkragt", "broadway-gone"} {
 		path := filepath.Join(dir, "host-users", f+".yaml")
@@ -77,13 +84,24 @@ func TestStaleAndManaged(t *testing.T) {
 	if want := []string{"host-users/atlas-gone.yaml"}; !slices.Equal(stale, want) {
 		t.Errorf("stale = %q, want %q", stale, want)
 	}
+}
 
-	managed, err := Managed(dir, "atlas", []string{"jkragt"})
-	if err != nil {
-		t.Fatal(err)
+func TestManaged(t *testing.T) {
+	tests := []struct {
+		path string
+		ok   bool
+	}{
+		{".sops.yaml", true},
+		{"hosts/atlas.yaml", true},
+		{"host-users/atlas-jkragt.yaml", true},
+		{"host-users/atlas-gone.yaml", true},
+		{"host-users/atlas-dev-jkragt.yaml", false},
+		{"hosts/broadway.yaml", false},
+		{"templates/host.yaml", false},
 	}
-	want := []string{".sops.yaml", "hosts/atlas.yaml", "host-users/atlas-jkragt.yaml", "host-users/atlas-gone.yaml"}
-	if !slices.Equal(managed, want) {
-		t.Errorf("managed = %q, want %q", managed, want)
+	for _, tt := range tests {
+		if ok := Managed("atlas", tt.path); ok != tt.ok {
+			t.Errorf("%s: got %v, want %v", tt.path, ok, tt.ok)
+		}
 	}
 }

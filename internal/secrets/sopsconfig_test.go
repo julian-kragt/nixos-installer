@@ -258,3 +258,27 @@ func TestApplyReportsABrokenRegex(t *testing.T) {
 		t.Errorf("err = %v, want the broken path_regex named", err)
 	}
 }
+
+// sops also encrypts to a recipient written literally into a rule, so it stays
+// and counts, also when the rule's aliases change.
+func TestLiteralRecipientsInARuleStay(t *testing.T) {
+	c, err := ParseConfig([]byte("keys:\n  - &host_atlas age1atlas\ncreation_rules:\n" +
+		"  - path_regex: ^hosts/atlas\\.yaml$\n    key_groups:\n      - age:\n          - *host_atlas\n          - age1admin\n" +
+		"  - path_regex: ^host-users/atlas-jkragt\\.yaml$\n    key_groups:\n      - age:\n          - age1admin\n          - *host_atlas\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply(t, c, atlas)
+	again, err := ParseConfig(marshalConfig(t, c))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for file, want := range map[string][]string{
+		HostFile("atlas"):           {atlasKey, "age1admin"},
+		UserFile("atlas", "jkragt"): {atlasKey, jkragtAt, "age1admin"},
+	} {
+		if got, err := again.Recipients(file); err != nil || !slices.Equal(got, want) {
+			t.Errorf("%s: recipients = %q, %v, want %q", file, got, err, want)
+		}
+	}
+}

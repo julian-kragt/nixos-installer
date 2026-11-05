@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 
@@ -55,7 +56,7 @@ const (
 // does not decrypt it from other failures. The ciphertext goes to a temp file,
 // as sops decrypts once per path; each value stays in a shell variable and
 // only meets builtins. sops' messages are dropped: they could hold a value.
-const fields = `f=$(mktemp) || exit 1
+var fields = `f=$(mktemp) || exit 1
 trap 'rm -f "$f"' EXIT
 cat > "$f"
 key=$1
@@ -71,12 +72,44 @@ esac
 for p in "$@"; do
 	v=$(SOPS_AGE_KEY_FILE="$key" sops decrypt --input-type yaml --output-type yaml --extract "$p" "$f" 2>/dev/null) || exit 6
 	case $v in
-	*[Cc][Hh][Aa][Nn][Gg][Ee]_[Mm][Ee]* | *[Cc][Hh][Aa][Nn][Gg][Ee][Mm][Ee]*) echo placeholder ;;
-	'') echo empty ;;
-	'$y$'* | '$gy$'* | '$7$'* | '$2a$'* | '$2b$'* | '$2y$'* | '$5$'* | '$6$'*) echo crypt ;;
-	*) echo value ;;
+	` + classPatterns + `
 	esac
 done`
+
+// classPatterns are the branches of a shell case on a value that print its
+// class by the rules of secrets.Classify, in the same order.
+var classPatterns = strings.Join([]string{
+	patterns(secrets.Placeholders, func(p string) string { return "*" + anyCase(p) + "*" }) + ") echo " + string(secrets.ClassPlaceholder) + " ;;",
+	"'') echo " + string(secrets.ClassEmpty) + " ;;",
+	patterns(secrets.CryptPrefixes, func(p string) string { return quote(p) + "*" }) + ") echo " + string(secrets.ClassCrypt) + " ;;",
+	"*) echo " + string(secrets.ClassValue) + " ;;",
+}, "\n\t")
+
+// patterns joins the case patterns pattern makes of each of values.
+func patterns(values []string, pattern func(string) string) string {
+	ps := make([]string, len(values))
+	for i, v := range values {
+		ps[i] = pattern(v)
+	}
+	return strings.Join(ps, " | ")
+}
+
+// anyCase is a case pattern matching s in any case: [Cc][Hh]… for its
+// letters, everything else quoted.
+func anyCase(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if up, low := unicode.ToUpper(r), unicode.ToLower(r); up != low {
+			b.WriteString("[" + string(up) + string(low) + "]")
+		} else {
+			b.WriteString(quote(string(r)))
+		}
+	}
+	return b.String()
+}
+
+// quote is s as a literal in a shell case pattern.
+func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // Fields decrypts ciphertext on target with the age key at keyFile and returns
 // each leaf with the class of its value. The paths come from the ciphertext,
@@ -132,14 +165,11 @@ func fieldsError(err error, keyFile string, printed []string, paths []secrets.Pa
 
 // leafPaths returns the paths of the values in a sops file, without its metadata.
 func leafPaths(ciphertext []byte) ([]secrets.Path, error) {
-	var doc yaml.Node
-	if err := yaml.Unmarshal(ciphertext, &doc); err != nil {
+	top, err := secrets.ParseMapping(ciphertext)
+	if err != nil {
 		return nil, fmt.Errorf("read sops file: %w", err)
 	}
-	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
-		return nil, errors.New("read sops file: no top-level mapping")
-	}
-	leaves, err := secrets.Leaves(doc.Content[0])
+	leaves, err := secrets.Leaves(top)
 	if err != nil {
 		return nil, fmt.Errorf("read sops file: %w", err)
 	}
@@ -177,14 +207,11 @@ func Recipients(ciphertext []byte) ([]string, error) {
 // CheckCiphertext fails unless data is a sops file: it has sops metadata and
 // every value outside it is encrypted.
 func CheckCiphertext(data []byte) error {
-	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return fmt.Errorf("not YAML: %w", err)
+	top, err := secrets.ParseMapping(data)
+	if err != nil {
+		return fmt.Errorf("not a sops file: %w", err)
 	}
-	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
-		return errors.New("not a sops file: no top-level mapping")
-	}
-	top, hasMetadata := doc.Content[0], false
+	hasMetadata := false
 	for i := 0; i+1 < len(top.Content); i += 2 {
 		if top.Content[i].Value == "sops" {
 			hasMetadata = true

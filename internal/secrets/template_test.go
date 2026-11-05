@@ -153,7 +153,7 @@ func TestCheckEdited(t *testing.T) {
 }
 
 func TestDocumentRefusesSopsKey(t *testing.T) {
-	m, err := parseMapping([]byte("sops: x\n"))
+	m, err := ParseMapping([]byte("sops: x\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

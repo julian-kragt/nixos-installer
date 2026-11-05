@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"installer/internal/commands/nix"
 	"installer/internal/machine"
 	"installer/internal/runner"
 )
@@ -35,9 +34,6 @@ type Env struct {
 	Local  machine.Machine // the provider: the machine the installer runs on
 	Remote machine.Machine // the target
 	Pin    machine.HostPin // the host key Remote accepts
-	// HostInfo is the config's installerData.<host>, evaluated once in a run
-	// by the first stage after the base install that reads it. Never saved.
-	HostInfo *nix.HostInfo
 }
 
 // NewEnv returns the Env for a run: in must be complete and st loaded. The host

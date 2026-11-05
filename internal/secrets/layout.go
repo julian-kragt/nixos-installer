@@ -19,12 +19,16 @@ const ConfigFile = ".sops.yaml"
 // one of host's.
 var userName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
+// hostName is a host name the layout keeps apart from any other: no
+// underscore, so user_<user>_<host> names one host and user, and nothing a
+// file glob or a YAML anchor would read as syntax.
+var hostName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
+
 // CheckNames fails unless the names of host and its users keep every file,
-// rule and anchor of the layout apart: a user name matches userName, and a
-// host name has no underscore, so user_<user>_<host> names one host and user.
+// rule and anchor of the layout apart: they match hostName and userName.
 func CheckNames(host string, users []string) error {
-	if host == "" || strings.ContainsAny(host, "_/") {
-		return fmt.Errorf("host %q: the nix-secrets layout needs a host name without _ or /", host)
+	if !hostName.MatchString(host) {
+		return fmt.Errorf("host %q: the nix-secrets layout needs a host name of letters, digits and -, not starting with -", host)
 	}
 	for _, u := range users {
 		if !userName.MatchString(u) {
@@ -79,12 +83,10 @@ func Stale(dir, host string, users []string) ([]string, error) {
 	return stale, nil
 }
 
-// Managed returns every path, relative to dir, that the secrets phase writes
-// for host: the sops configuration, the files of users and stale user files.
-func Managed(dir, host string, users []string) ([]string, error) {
-	stale, err := Stale(dir, host, users)
-	if err != nil {
-		return nil, err
-	}
-	return slices.Concat([]string{ConfigFile}, Files(host, users), stale), nil
+// Managed reports whether the secrets phase writes path, relative to the
+// repository, for host: the sops configuration, the host's own file, or a user
+// file of host, which it writes for a user on the host and deletes otherwise.
+func Managed(host, path string) bool {
+	_, userFile := FileUser(host, path)
+	return path == ConfigFile || path == HostFile(host) || userFile
 }

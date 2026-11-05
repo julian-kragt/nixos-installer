@@ -120,6 +120,19 @@ func TestRecipientsThenCommitPushMakeOneCommit(t *testing.T) {
 	}
 }
 
+// A run that stops after 2.2 leaves the file of the removed user deleted; 2.1
+// in the next run accepts that.
+func TestSecretsRepositoryAcceptsTheDeletionsOfRecipients(t *testing.T) {
+	env, _ := secretsEnv(t)
+	ctx := context.Background()
+	if err := recipients(ctx, env); err != nil {
+		t.Fatal(err)
+	}
+	if err := secretsRepository(ctx, env); err != nil {
+		t.Errorf("2.1 after 2.2: %v", err)
+	}
+}
+
 func TestCommitPushCommitsDeletionsInASubdirectory(t *testing.T) {
 	env, _ := secretsEnvIn(t, "secrets")
 	ctx := context.Background()

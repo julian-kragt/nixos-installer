@@ -204,3 +204,22 @@ func TestCheckCiphertext(t *testing.T) {
 		})
 	}
 }
+
+// The target classifies a value as secrets.Classify does.
+func TestClassPatternsClassifyLikeGo(t *testing.T) {
+	script := "for v in \"$@\"; do\n\tcase $v in\n\t" + classPatterns + "\n\tesac\ndone"
+	values := []string{"", "x", "change_me", "a CHANGEME b", "Change_Me", "change-me", hash, "$6$salt$h", "$1$old", "it's", "*", "$y"}
+	out, err := exec.Command("sh", append([]string{"-c", script, "sh"}, values...)...).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+	if len(got) != len(values) {
+		t.Fatalf("got %q for %d values", got, len(values))
+	}
+	for i, v := range values {
+		if want := string(secrets.Classify(v)); got[i] != want {
+			t.Errorf("%q: shell says %s, Classify %s", v, got[i], want)
+		}
+	}
+}

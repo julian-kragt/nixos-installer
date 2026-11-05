@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"slices"
 	"strings"
 
 	"installer/internal/machine"
@@ -39,10 +38,13 @@ func (r Repo) HasUpstream(ctx context.Context) (bool, error) {
 	return err == nil, err
 }
 
-// Dirty returns the tracked files of the repository with uncommitted changes,
-// as paths relative to the repository top. Untracked files are not listed:
-// a flake does not see them either.
-func (r Repo) Dirty(ctx context.Context) ([]string, error) {
+// change is an entry of `git status --porcelain`: its two status letters and
+// a path relative to the repository top.
+type change struct{ status, path string }
+
+// changes returns the tracked files of the repository with uncommitted
+// changes. Untracked files are not listed: a flake does not see them either.
+func (r Repo) changes(ctx context.Context) ([]change, error) {
 	out, err := r.run(ctx, "status", "--porcelain", "-z", "--untracked-files=no")
 	if err != nil {
 		return nil, err
@@ -50,32 +52,67 @@ func (r Repo) Dirty(ctx context.Context) ([]string, error) {
 	return parseStatus(out), nil
 }
 
-// parseStatus returns the paths in `git status --porcelain -z` output. A
+// parseStatus returns the entries of `git status --porcelain -z` output. A
 // rename or copy entry is followed by a bare entry with the original path;
-// both count.
-func parseStatus(out string) []string {
-	var paths []string
+// both count, with the status of the rename or copy.
+func parseStatus(out string) []change {
+	var changes []change
 	entries := strings.Split(out, "\x00")
 	for i := 0; i < len(entries); i++ {
 		e := entries[i]
 		if len(e) < 4 {
 			continue
 		}
-		paths = append(paths, e[3:])
-		if e[0] == 'R' || e[0] == 'C' || e[1] == 'R' || e[1] == 'C' {
+		c := change{status: e[:2], path: e[3:]}
+		changes = append(changes, c)
+		if strings.ContainsAny(c.status, "RC") {
 			i++
 			if i < len(entries) && entries[i] != "" {
-				paths = append(paths, entries[i])
+				changes = append(changes, change{status: c.status, path: entries[i]})
 			}
 		}
 	}
-	return paths
+	return changes
+}
+
+// Dirty returns the tracked files of the repository with uncommitted changes,
+// as paths relative to the repository top.
+func (r Repo) Dirty(ctx context.Context) ([]string, error) {
+	changes, err := r.changes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, len(changes))
+	for i, c := range changes {
+		paths[i] = c.path
+	}
+	return paths, nil
+}
+
+// Deleted returns the tracked files below Dir that are deleted and not
+// committed, staged or not, as paths relative to Dir.
+func (r Repo) Deleted(ctx context.Context) ([]string, error) {
+	prefix, err := r.Prefix(ctx)
+	if err != nil {
+		return nil, err
+	}
+	changes, err := r.changes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var deleted []string
+	for _, c := range changes {
+		if p, ok := strings.CutPrefix(c.path, prefix); ok && strings.Contains(c.status, "D") {
+			deleted = append(deleted, p)
+		}
+	}
+	return deleted, nil
 }
 
 // RequireCommitted fails unless Dir is in a git repository whose branch has an
-// upstream and that has no uncommitted changes besides managed, the paths
-// (relative to Dir) that the installer changes itself.
-func (r Repo) RequireCommitted(ctx context.Context, managed ...string) error {
+// upstream and that has no uncommitted changes besides the paths managed
+// accepts: those (relative to Dir) that the installer changes itself.
+func (r Repo) RequireCommitted(ctx context.Context, managed func(path string) bool) error {
 	prefix, err := r.Prefix(ctx)
 	if err != nil {
 		return fmt.Errorf("%s is not a git repository: %w", r.Dir, err)
@@ -97,12 +134,13 @@ func (r Repo) RequireCommitted(ctx context.Context, managed ...string) error {
 	return nil
 }
 
-// unmanagedChanges returns the dirty paths (relative to the repository top) that
-// are not in managed (relative to prefix, where Dir sits in the repository).
-func unmanagedChanges(dirty []string, prefix string, managed []string) []string {
+// unmanagedChanges returns the dirty paths (relative to the repository top)
+// that managed does not accept relative to prefix, where Dir sits in the
+// repository. A path outside Dir is never managed.
+func unmanagedChanges(dirty []string, prefix string, managed func(path string) bool) []string {
 	var other []string
 	for _, p := range dirty {
-		if !slices.ContainsFunc(managed, func(m string) bool { return prefix+m == p }) {
+		if rel, ok := strings.CutPrefix(p, prefix); !ok || !managed(rel) {
 			other = append(other, p)
 		}
 	}

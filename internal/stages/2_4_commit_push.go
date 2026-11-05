@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"installer/internal/commands/sops"
 	"installer/internal/pipeline"
@@ -32,23 +31,13 @@ func commitPush(ctx context.Context, env *pipeline.Env) error {
 			return fmt.Errorf("%s: %w; nothing was committed", f, err)
 		}
 	}
-	// The files of removed users, deleted by 2.2. Dirty paths start at the top
-	// of the repository, which nix-secrets may sit below.
-	prefix, err := secretsRepo(env).Prefix(ctx)
+	// The files of removed users, deleted by 2.2.
+	deleted, err := secretsRepo(env).Deleted(ctx)
 	if err != nil {
 		return err
 	}
-	dirty, err := secretsRepo(env).Dirty(ctx)
-	if err != nil {
-		return err
-	}
-	for _, p := range dirty {
-		p, ok := strings.CutPrefix(p, prefix)
-		if !ok {
-			continue
-		}
-		_, ok = secrets.FileUser(env.Host, p)
-		if _, err := os.Stat(filepath.Join(env.SecretsDir, p)); ok && os.IsNotExist(err) {
+	for _, p := range deleted {
+		if _, ok := secrets.FileUser(env.Host, p); ok {
 			files = append(files, p)
 		}
 	}

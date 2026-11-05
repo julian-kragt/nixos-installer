@@ -74,13 +74,10 @@ func authorFile(ctx context.Context, env *pipeline.Env, cfg *secrets.Config, fil
 			if err != nil {
 				return err
 			}
-			check := func(b []byte) error { _, err := tmpl.CheckEdited(b); return err }
-			edited, err := vim.EditUntil(ctx, filepath.Base(file), buffer, check)
-			if err != nil {
+			// content is what the operator saved once check accepts it.
+			check := func(b []byte) (err error) { content, err = tmpl.CheckEdited(b); return err }
+			if _, err := vim.EditUntil(ctx, filepath.Base(file), buffer, check); err != nil {
 				return fmt.Errorf("%s: %w", file, err)
-			}
-			if content, err = tmpl.CheckEdited(edited); err != nil {
-				return err
 			}
 		}
 		var hashes []secrets.Assignment

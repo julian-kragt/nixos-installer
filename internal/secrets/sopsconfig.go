@@ -1,7 +1,6 @@
 package secrets
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"maps"
@@ -14,7 +13,7 @@ import (
 
 // Config is a .sops.yaml as a yaml.v3 node tree, so anchors, aliases and
 // comments survive an edit. Recipients are anchored entries of `keys`; a
-// creation rule lists them by alias.
+// creation rule lists them by alias, or literally when an operator wrote one in.
 type Config struct {
 	root *yaml.Node // the top-level mapping
 }
@@ -36,17 +35,11 @@ func ParseConfig(data []byte) (*Config, error) {
 
 // Marshal writes c as YAML, indented the way nix-secrets is.
 func (c *Config) Marshal() ([]byte, error) {
-	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	doc := &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{c.root}}
-	if err := enc.Encode(doc); err != nil {
+	out, err := marshal(c.root)
+	if err != nil {
 		return nil, fmt.Errorf("write %s: %w", ConfigFile, err)
 	}
-	if err := enc.Close(); err != nil {
-		return nil, fmt.Errorf("write %s: %w", ConfigFile, err)
-	}
-	return buf.Bytes(), nil
+	return out, nil
 }
 
 // HostAnchor names the recipient of host's own age key.
@@ -101,7 +94,8 @@ func (c *Config) Replacements(h Host) []Replaced {
 
 // Apply makes c say exactly h about h's files: the anchors with their
 // recipients, one rule per file with exactly its recipients, which sops uses
-// for that file. Rules and anchors of users no longer on the host are removed;
+// for that file. A recipient an operator wrote literally into such a rule
+// stays. Rules and anchors of users no longer on the host are removed;
 // it returns those users, sorted. An anchor that a rule of another host still
 // uses stays.
 func (c *Config) Apply(h Host) ([]string, error) {
@@ -131,8 +125,8 @@ func (c *Config) Apply(h Host) ([]string, error) {
 	return removed, nil
 }
 
-// Recipients returns the recipients of the rule sops uses for file: the first
-// that matches it.
+// Recipients returns the recipients of the rule sops uses for file, the first
+// that matches it: those it lists by alias, then those it lists literally.
 func (c *Config) Recipients(file string) ([]string, error) {
 	for _, rule := range c.seq("creation_rules").Content {
 		ok, err := matches(rule, file)
@@ -142,15 +136,16 @@ func (c *Config) Recipients(file string) ([]string, error) {
 		if !ok {
 			continue
 		}
+		aliases, literals := ageKeys(rule)
 		var out []string
-		for _, alias := range ageAliases(rule) {
+		for _, alias := range aliases {
 			r, ok := c.Key(alias)
 			if !ok {
 				return nil, fmt.Errorf("%s: the rule for %s uses *%s, which is not a key", ConfigFile, file, alias)
 			}
 			out = append(out, r)
 		}
-		return out, nil
+		return append(out, literals...), nil
 	}
 	return nil, errors.New(ConfigFile + ": no creation rule matches " + file)
 }
@@ -182,25 +177,26 @@ func (c *Config) removeKey(anchor string) {
 	keys.Content = slices.DeleteFunc(keys.Content, func(k *yaml.Node) bool { return k.Anchor == anchor })
 }
 
-// setRule makes the rule for regex, which matches file, list exactly anchors,
-// in one age key group. sops uses the first rule that matches a file, so the
-// rule goes before any other that matches file: a missing one there or at the
-// end, an existing one moved there. A rule that already says this is left as
-// it is.
+// setRule makes the rule for regex, which matches file, list exactly anchors
+// by alias, in one age key group, which keeps the rule's literal recipients.
+// sops uses the first rule that matches a file, so the rule goes before any
+// other that matches file: a missing one there or at the end, an existing one
+// moved there. A rule that already says this is left as it is.
 func (c *Config) setRule(file, regex string, anchors ...string) error {
 	rules := c.seq("creation_rules")
 	i := c.ruleIndex(regex)
 	var rule *yaml.Node
 	if i >= 0 {
 		rule = rules.Content[i]
-		if !slices.Equal(ageAliases(rule), anchors) || len(value(rule, "key_groups").Content) != 1 {
-			setValue(rule, "key_groups", keyGroups(anchors))
+		aliases, literals := ageKeys(rule)
+		if !slices.Equal(aliases, anchors) || len(value(rule, "key_groups").Content) != 1 {
+			setValue(rule, "key_groups", keyGroups(anchors, literals))
 		}
 		rules.Content = slices.Delete(rules.Content, i, i+1)
 	} else {
 		rule = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		setValue(rule, "path_regex", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: regex})
-		setValue(rule, "key_groups", keyGroups(anchors))
+		setValue(rule, "key_groups", keyGroups(anchors, nil))
 		i = len(rules.Content)
 	}
 	at := i
@@ -235,7 +231,8 @@ func (c *Config) ruleIndex(regex string) int {
 // uses reports whether any rule lists anchor.
 func (c *Config) uses(anchor string) bool {
 	return slices.ContainsFunc(c.seq("creation_rules").Content, func(r *yaml.Node) bool {
-		return slices.Contains(ageAliases(r), anchor)
+		aliases, _ := ageKeys(r)
+		return slices.Contains(aliases, anchor)
 	})
 }
 
@@ -250,7 +247,7 @@ func (c *Config) ruleUsers(host string) []string {
 			continue
 		}
 		u := strings.TrimSuffix(strings.TrimPrefix(v.Value, prefix), suffix)
-		if userName.MatchString(u) && slices.Contains(ageAliases(r), HostAnchor(host)) {
+		if aliases, _ := ageKeys(r); userName.MatchString(u) && slices.Contains(aliases, HostAnchor(host)) {
 			users = append(users, u)
 		}
 	}
@@ -291,23 +288,27 @@ func setValue(m *yaml.Node, key string, v *yaml.Node) {
 	m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, v)
 }
 
-// keyGroups is a key_groups value with one age group listing anchors by alias.
-func keyGroups(anchors []string) *yaml.Node {
+// keyGroups is a key_groups value with one age group listing anchors by alias,
+// then the recipients literals.
+func keyGroups(anchors, literals []string) *yaml.Node {
 	age := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 	for _, a := range anchors {
 		age.Content = append(age.Content, &yaml.Node{Kind: yaml.AliasNode, Value: a})
+	}
+	for _, r := range literals {
+		age.Content = append(age.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: r})
 	}
 	group := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	setValue(group, "age", age)
 	return &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Content: []*yaml.Node{group}}
 }
 
-// ageAliases returns the anchors the age groups of rule list, in order.
-func ageAliases(rule *yaml.Node) []string {
-	var out []string
+// ageKeys returns what the age groups of rule list, in order: the anchors it
+// lists by alias and the recipients it lists literally.
+func ageKeys(rule *yaml.Node) (aliases, literals []string) {
 	groups := value(rule, "key_groups")
 	if groups == nil {
-		return nil
+		return nil, nil
 	}
 	for _, g := range groups.Content {
 		age := value(g, "age")
@@ -315,12 +316,15 @@ func ageAliases(rule *yaml.Node) []string {
 			continue
 		}
 		for _, a := range age.Content {
-			if a.Kind == yaml.AliasNode {
-				out = append(out, a.Value)
+			switch a.Kind {
+			case yaml.AliasNode:
+				aliases = append(aliases, a.Value)
+			case yaml.ScalarNode:
+				literals = append(literals, a.Value)
 			}
 		}
 	}
-	return out
+	return aliases, literals
 }
 
 // matches reports whether sops takes rule for file: its path_regex matches

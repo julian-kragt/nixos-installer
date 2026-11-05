@@ -23,8 +23,8 @@ var All = []pipeline.Stage{
 	{ID: "0.0", Name: "Environment preparation", Always: true, Run: environmentPreparation},
 	{ID: "0.1", Name: "Provider preparation", Run: providerPreparation},
 	{ID: stageBaseInstall, Name: "Base install", Run: baseInstall},
-	{ID: "1.1", Name: "Host identity", Run: hostIdentity, Outdated: hostIdentityOutdated},
-	{ID: "1.2", Name: "Readiness", Run: readiness},
+	{ID: "1.1", Name: "Readiness", Run: readiness},
+	{ID: "1.2", Name: "Host identity", Run: hostIdentity, Outdated: hostIdentityOutdated},
 	{ID: "1.3", Name: "User identity", Run: userIdentity, Outdated: userIdentityOutdated},
 	{ID: "2.1", Name: "Secrets repository", Run: secretsRepository},
 	{ID: "2.2", Name: "Recipients", Run: recipients},
@@ -47,17 +47,23 @@ func secretsRepo(env *pipeline.Env) git.Repo {
 	return git.Repo{Machine: env.Local, Dir: env.SecretsDir}
 }
 
-// hostInfo returns the config's entry for the host, evaluated once per run.
-// 0.1 and 0.2 evaluate it themselves: 0.1 may change the config.
+// hostInfos holds the config's entry for the host of each run, for hostInfo.
+// Stages run one at a time, so it needs no lock.
+var hostInfos = map[*pipeline.Env]nix.HostInfo{}
+
+// hostInfo returns the config's entry for the host, evaluated once per run
+// and never saved. 0.1 and 0.2 evaluate it themselves: 0.1 may change the
+// config.
 func hostInfo(ctx context.Context, env *pipeline.Env) (nix.HostInfo, error) {
-	if env.HostInfo == nil {
-		info, err := configFlake(env).HostInfo(ctx, env.Host)
-		if err != nil {
-			return nix.HostInfo{}, err
-		}
-		env.HostInfo = &info
+	if info, ok := hostInfos[env]; ok {
+		return info, nil
 	}
-	return *env.HostInfo, nil
+	info, err := configFlake(env).HostInfo(ctx, env.Host)
+	if err != nil {
+		return nix.HostInfo{}, err
+	}
+	hostInfos[env] = info
+	return info, nil
 }
 
 // hostUsers returns the normal users of the host, sorted, as the config defines

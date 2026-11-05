@@ -43,8 +43,8 @@ func newRepo(t *testing.T) string {
 }
 
 func TestParseStatus(t *testing.T) {
-	out := " M a b\x00R  new\x00old\x00A  c\x00"
-	want := []string{"a b", "new", "old", "c"}
+	out := " M a b\x00R  new\x00old\x00D  c\x00"
+	want := []change{{" M", "a b"}, {"R ", "new"}, {"R ", "old"}, {"D ", "c"}}
 	if got := parseStatus(out); !slices.Equal(got, want) {
 		t.Fatalf("got %q, want %q", got, want)
 	}
@@ -68,6 +68,27 @@ func TestPrefixAndDirty(t *testing.T) {
 	if err != nil || !slices.Equal(got, []string{"sub/a"}) {
 		t.Fatalf("got %q, %v", got, err)
 	}
+}
+
+func TestDeleted(t *testing.T) {
+	dir := newRepo(t)
+	write(t, dir, "sub/c", "1")
+	write(t, dir, "sub/d", "1") // keeps sub/
+	sh(t, dir, "add", ".")
+	sh(t, dir, "commit", "-q", "-m", "c")
+	if err := os.Remove(filepath.Join(dir, "sub/a")); err != nil {
+		t.Fatal(err)
+	}
+	sh(t, dir, "rm", "-q", "sub/c", "b")
+	got, err := (Repo{machine.Local(), filepath.Join(dir, "sub")}).Deleted(ctx)
+	if want := []string{"a", "c"}; err != nil || !slices.Equal(got, want) {
+		t.Fatalf("got %q, %v, want %q: deletions below sub/, staged or not", got, err, want)
+	}
+}
+
+// only accepts exactly paths.
+func only(paths ...string) func(string) bool {
+	return func(p string) bool { return slices.Contains(paths, p) }
 }
 
 // pushed gives the repository at dir an upstream.
@@ -94,22 +115,22 @@ func TestHasUpstream(t *testing.T) {
 func TestRequireCommitted(t *testing.T) {
 	dir := newRepo(t)
 	r := Repo{machine.Local(), filepath.Join(dir, "sub")}
-	if err := (Repo{machine.Local(), t.TempDir()}).RequireCommitted(ctx); err == nil || !strings.Contains(err.Error(), "not a git repository") {
+	if err := (Repo{machine.Local(), t.TempDir()}).RequireCommitted(ctx, only()); err == nil || !strings.Contains(err.Error(), "not a git repository") {
 		t.Errorf("no repository: err = %v", err)
 	}
-	if err := r.RequireCommitted(ctx); err == nil || !strings.Contains(err.Error(), "no upstream") {
+	if err := r.RequireCommitted(ctx, only()); err == nil || !strings.Contains(err.Error(), "no upstream") {
 		t.Errorf("no upstream: err = %v", err)
 	}
 	pushed(t, dir)
-	if err := r.RequireCommitted(ctx); err != nil {
+	if err := r.RequireCommitted(ctx, only()); err != nil {
 		t.Errorf("clean: %v", err)
 	}
 	write(t, dir, "sub/a", "2") // sub/a is managed, relative to the config in sub/
-	if err := r.RequireCommitted(ctx, "a"); err != nil {
+	if err := r.RequireCommitted(ctx, only("a")); err != nil {
 		t.Errorf("managed change: %v", err)
 	}
 	write(t, dir, "b", "2")
-	if err := r.RequireCommitted(ctx, "a"); err == nil || !strings.Contains(err.Error(), ": b\n") {
+	if err := r.RequireCommitted(ctx, only("a")); err == nil || !strings.Contains(err.Error(), ": b\n") {
 		t.Errorf("other change: err = %v", err)
 	}
 }
@@ -121,7 +142,7 @@ func TestUnmanagedChanges(t *testing.T) {
 		"cfg/hosts/nixos/h/hardware-configuration.nix",
 		"flake.lock",
 	}
-	managed := []string{"machines/h/hw.nix", "flake.lock"}
+	managed := only("machines/h/hw.nix", "flake.lock")
 	want := []string{"cfg/hosts/nixos/h/hardware-configuration.nix", "flake.lock"}
 	if got := unmanagedChanges(dirty, "cfg/", managed); !slices.Equal(got, want) {
 		t.Errorf("got %q, want %q", got, want)

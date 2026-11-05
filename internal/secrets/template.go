@@ -103,7 +103,7 @@ type Template struct {
 // leaf holding change_me or CHANGEME, or nothing, is a secret; any other leaf
 // is a literal.
 func ParseTemplate(data []byte) (*Template, error) {
-	root, err := parseMapping(data)
+	root, err := ParseMapping(data)
 	if err != nil {
 		return nil, fmt.Errorf("parse template: %w", err)
 	}
@@ -165,7 +165,7 @@ func (t *Template) Buffer(file string) ([]byte, error) {
 // CheckEdited parses what the operator wrote for the template's file and
 // checks it like Check, leaving out the passwords, which are not set yet.
 func (t *Template) CheckEdited(data []byte) (*yaml.Node, error) {
-	m, err := parseMapping(data)
+	m, err := ParseMapping(data)
 	if err != nil {
 		return nil, err
 	}
@@ -207,19 +207,23 @@ const (
 	ClassValue       Class = "value"
 )
 
-// cryptPrefixes start the crypt(3) hashes Classify recognises.
-var cryptPrefixes = []string{"$y$", "$gy$", "$7$", "$2a$", "$2b$", "$2y$", "$5$", "$6$"}
+// Placeholders are the values, in lowercase, that mark a value to fill in
+// wherever they appear in it, in any case.
+var Placeholders = []string{"change_me", "changeme"}
+
+// CryptPrefixes start the crypt(3) hashes Classify recognises.
+var CryptPrefixes = []string{"$y$", "$gy$", "$7$", "$2a$", "$2b$", "$2y$", "$5$", "$6$"}
 
 // Classify says what v looks like. The target classifies with the same rules
-// in shell (internal/commands/sops), so both must change together.
+// in shell (internal/commands/sops), built from Placeholders and CryptPrefixes.
 func Classify(v string) Class {
 	lower := strings.ToLower(v)
 	switch {
-	case strings.Contains(lower, "change_me") || strings.Contains(lower, "changeme"):
+	case slices.ContainsFunc(Placeholders, func(p string) bool { return strings.Contains(lower, p) }):
 		return ClassPlaceholder
 	case v == "":
 		return ClassEmpty
-	case slices.ContainsFunc(cryptPrefixes, func(p string) bool { return strings.HasPrefix(v, p) }):
+	case slices.ContainsFunc(CryptPrefixes, func(p string) bool { return strings.HasPrefix(v, p) }):
 		return ClassCrypt
 	}
 	return ClassValue
@@ -294,8 +298,9 @@ func AskValue(ctx context.Context, label string) (string, error) {
 	}
 }
 
-// parseMapping parses a YAML document that must be a mapping with keys.
-func parseMapping(data []byte) (*yaml.Node, error) {
+// ParseMapping parses a YAML document that must be a mapping with keys, as a
+// secret file, its template and a sops file are.
+func ParseMapping(data []byte) (*yaml.Node, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, err
@@ -319,11 +324,12 @@ func text(n *yaml.Node) string {
 	return strings.TrimSpace(string(out))
 }
 
-func marshal(m *yaml.Node) ([]byte, error) {
+// marshal writes the node n as YAML, indented the way nix-secrets is.
+func marshal(n *yaml.Node) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
-	if err := enc.Encode(m); err != nil {
+	if err := enc.Encode(n); err != nil {
 		return nil, err
 	}
 	if err := enc.Close(); err != nil {

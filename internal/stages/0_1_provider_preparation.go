@@ -31,7 +31,7 @@ func providerPreparation(ctx context.Context, env *pipeline.Env) error {
 		}},
 		runner.Step{Title: "Check config repository", Fn: func(ctx context.Context) error {
 			// Only pushed config is installed in Phase 3. The installer changes these two itself.
-			if err := configRepo(env).RequireCommitted(ctx, hardwareConfigPath, "flake.lock"); err != nil {
+			if err := configRepo(env).RequireCommitted(ctx, func(p string) bool { return p == hardwareConfigPath || p == "flake.lock" }); err != nil {
 				return err
 			}
 			return configRepo(env).RequireInSync(ctx)
