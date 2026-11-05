@@ -24,7 +24,6 @@ type Access struct {
 	Addr      string  // IP address of the target
 	Pin       HostPin // the host key Remote accepts
 	Installed bool    // the base install is done, so the system must not change
-	StateFile string  // what to remove, besides the pin, to start over
 }
 
 // CheckHostKey checks the key the target offers against the pin.
@@ -57,8 +56,7 @@ func (a Access) checkOffered(ctx context.Context, offered ssh.PublicKey) error {
 	change := fmt.Sprintf("the host key of %s changed\n  pinned: %s\n  target: %s",
 		a.Addr, Fingerprint(pinned), Fingerprint(offered))
 	if a.Installed {
-		return fmt.Errorf("%s\nthis is not the system that was installed; if you reinstalled it on purpose, remove %s and %s to start over",
-			change, a.Pin.File, a.StateFile)
+		return fmt.Errorf("%s\nthis is not the system that was installed; to install it again, boot the NixOS ISO and run with --reinstall", change)
 	}
 	runner.Warn(ctx, change)
 	err = runner.RequireTyped(ctx, "If you rebooted the ISO or the install was interrupted, type 'trust' to accept the new key: ",

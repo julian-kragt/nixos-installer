@@ -19,6 +19,7 @@ type Inputs struct {
 	Target      string // IP address of the target machine
 	ConfigDir   string // absolute path to the config flake
 	SSHPassword string // root SSH password of the NixOS ISO for initial key bootstrap; prompts when empty
+	Reinstall   bool   // delete what is saved for Host before loading its state
 	// GenerateHardware generates a missing hardware config without asking.
 	GenerateHardware bool
 }

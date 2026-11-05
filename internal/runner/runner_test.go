@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -127,6 +128,18 @@ func squash(lines []string) []string {
 	return out
 }
 
+// squashDurations closes the gap before a duration and leaves the rest of a
+// row alone, unlike squash, so the indentation inside a message stays.
+func squashDurations(lines []string) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = durationGap.ReplaceAllString(l, " $1")
+	}
+	return out
+}
+
+var durationGap = regexp.MustCompile(`\s{2,}(\d+ms)$`)
+
 func eq(t *testing.T, got, want []string) {
 	t.Helper()
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -142,11 +155,11 @@ func TestParentStaysAboveChildren(t *testing.T) {
 
 	h.r.draw()
 	got := squash(h.screen())
-	eq(t, got, []string{"⠋ Parent", "  ✓ Child A 0ms", "  ✗ Child B: boom 0ms"})
+	eq(t, got, []string{"⠋ Parent", "  ✓ Child A 0ms", "  ✗ Child B 0ms", "    boom"})
 
 	parent.End(nil)
 	h.r.draw()
-	eq(t, squash(h.screen()), []string{"✓ Parent 0ms", "  ✓ Child A 0ms", "  ✗ Child B: boom 0ms"})
+	eq(t, squash(h.screen()), []string{"✓ Parent 0ms", "  ✓ Child A 0ms", "  ✗ Child B 0ms", "    boom"})
 	if h.r.liveLines != 0 {
 		t.Fatalf("liveLines = %d, want 0", h.r.liveLines)
 	}
@@ -234,6 +247,98 @@ func TestLinesNeverWrap(t *testing.T) {
 			t.Fatalf("line too wide (%d): %q", runeLen(plain), plain)
 		}
 	}
+}
+
+func TestErrorRowsDoNotMoveTheDurations(t *testing.T) {
+	msg := strings.Repeat("x", 100)
+	h := newTTY(t, 80, 24, false)
+	_ = Run(h.ctx, "Stage", func(ctx context.Context) error {
+		_ = Run(ctx, "Short", func(context.Context) error { return nil })
+		return Run(ctx, "Failing", func(context.Context) error { return errors.New(msg) })
+	})
+	h.r.draw()
+	pad := func(s string) string { return s + strings.Repeat(" ", minDurColumn-runeLen(s)) + "0ms" }
+	eq(t, h.screen(), []string{
+		pad("✗ Stage"),
+		pad("  ✓ Short"),
+		pad("  ✗ Failing"),
+		"    " + msg,
+	})
+}
+
+func TestErrorKeepsItsLinesUnderTheFailedStep(t *testing.T) {
+	h := newTTY(t, 80, 24, false)
+	_ = Run(h.ctx, "Stage", func(ctx context.Context) error {
+		return Run(ctx, "Step", func(ctx context.Context) error {
+			fmt.Fprintln(Output(ctx), "output")
+			return errors.New("changed\n  pinned: a\n\n\033[31m  target: b\033[0m\nstart over\n")
+		})
+	})
+	h.r.draw()
+	eq(t, squashDurations(h.screen()), []string{
+		"✗ Stage 0ms",
+		"  ✗ Step 0ms",
+		"  │ output",
+		"    changed",
+		"      pinned: a",
+		"      target: b",
+		"    start over",
+	})
+}
+
+func TestErrorOfAStepShownOnce(t *testing.T) {
+	for name, tt := range map[string]struct {
+		run  func(ctx context.Context) error
+		want []string
+	}{
+		"returned as is": {
+			run: func(ctx context.Context) error {
+				return Run(ctx, "A", func(context.Context) error { return errors.New("boom") })
+			},
+			want: []string{"✗ Stage 0ms", "  ✗ A 0ms", "    boom"},
+		},
+		"joined by Parallel": {
+			run: func(ctx context.Context) error {
+				return Parallel(ctx,
+					Step{"A", func(context.Context) error { return errors.New("e1") }},
+					Step{"B", func(context.Context) error { return errors.New("e2") }},
+				)
+			},
+			want: []string{"✗ Stage 0ms", "  ✗ A 0ms", "    e1", "  ✗ B 0ms", "    e2"},
+		},
+		"with added context": {
+			run: func(ctx context.Context) error {
+				return fmt.Errorf("log in: %w", Run(ctx, "A", func(context.Context) error { return errors.New("boom") }))
+			},
+			want: []string{"✗ Stage 0ms", "  ✗ A 0ms", "    boom", "  log in: boom"},
+		},
+		"another error after a tolerated one": {
+			run: func(ctx context.Context) error {
+				_ = Run(ctx, "A", func(context.Context) error { return errors.New("boom") })
+				return errors.New("other")
+			},
+			want: []string{"✗ Stage 0ms", "  ✗ A 0ms", "    boom", "  other"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newTTY(t, 80, 24, false)
+			_ = Run(h.ctx, "Stage", tt.run)
+			h.r.draw()
+			eq(t, squashDurations(h.screen()), tt.want)
+		})
+	}
+}
+
+func TestLiveErrorRowsNeverWrap(t *testing.T) {
+	h := newTTY(t, 30, 24, false)
+	ctx, _ := Start(h.ctx, "Stage")
+	_ = Run(ctx, "Step", func(context.Context) error { return errors.New(strings.Repeat("x", 100)) })
+	h.r.draw()
+	eq(t, squashDurations(h.screen()), []string{
+		"⠋ Stage",
+		"  ✗ Step 0ms",
+		"    " + strings.Repeat("x", 24) + "…",
+	})
 }
 
 // task2ctx is a helper to log into a task created without keeping its ctx.
@@ -429,7 +534,7 @@ func TestEndFailureMessage(t *testing.T) {
 	r := newRunner(Options{Out: &buf}, false, nil)
 	ctx := NewContext(context.Background(), r)
 	err := Run(ctx, "Disk", func(context.Context) error { return errors.New("no space\nleft") })
-	if err == nil || !strings.Contains(buf.String(), "✗ Disk: no space; left") {
+	if err == nil || !strings.Contains(buf.String(), "\n  no space\n  left\n") {
 		t.Fatalf("got %q", buf.String())
 	}
 }

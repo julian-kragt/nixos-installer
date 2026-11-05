@@ -117,10 +117,10 @@ func TestCheckHostKey(t *testing.T) {
 		{name: "changed and trusted", pin: pinned, offered: other, answer: "trust\n", wantPin: other},
 		{name: "changed and declined", pin: pinned, offered: other, answer: "no\n", wantErr: "aborted", wantPin: pinned},
 		{name: "changed, nobody to ask", pin: pinned, offered: other, wantErr: "host key", wantPin: pinned},
-		{name: "changed after the install", pin: pinned, offered: other, installed: true, answer: "trust\n", wantErr: "not the system", wantPin: pinned},
+		{name: "changed after the install", pin: pinned, offered: other, installed: true, answer: "trust\n", wantErr: "--reinstall", wantPin: pinned},
 	}
 	for _, c := range cases {
-		a := Access{Addr: "192.0.2.1", Pin: NewHostPin(t.TempDir(), "h"), Installed: c.installed, StateFile: "h.json"}
+		a := Access{Addr: "192.0.2.1", Pin: NewHostPin(t.TempDir(), "h"), Installed: c.installed}
 		if c.pin != nil {
 			if err := a.Pin.Save(c.pin); err != nil {
 				t.Fatal(err)

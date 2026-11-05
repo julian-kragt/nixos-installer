@@ -20,7 +20,6 @@ func environmentPreparation(ctx context.Context, env *pipeline.Env) error {
 		Addr:      env.Target,
 		Pin:       env.Pin,
 		Installed: env.State.IsCompleted(stageBaseInstall),
-		StateFile: env.State.Path(),
 	}
 	return runner.RunSteps(ctx,
 		runner.Step{Title: "Check local tools", Fn: checkLocalTools},

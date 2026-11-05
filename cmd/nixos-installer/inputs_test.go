@@ -161,3 +161,32 @@ func TestResolveInputsFromFlagsAsksNothing(t *testing.T) {
 		t.Errorf("state: %+v", st)
 	}
 }
+
+func TestResolveInputsReinstallStartsOver(t *testing.T) {
+	stateDir := t.TempDir()
+	saved, err := pipeline.LoadState(stateDir, "atlas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved.Completed = []string{"0.1", "0.2"}
+	if err := saved.Save(); err != nil {
+		t.Fatal(err)
+	}
+	pin := filepath.Join(stateDir, "atlas.known_hosts")
+	if err := os.WriteFile(pin, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, _ := operator("")
+	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas"), Host: "atlas", Target: "192.168.1.100", Reinstall: true}
+	st, err := resolveInputs(ctx, &in, stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Completed) != 0 {
+		t.Errorf("state: %+v", st)
+	}
+	if _, err := os.Stat(pin); !os.IsNotExist(err) {
+		t.Errorf("pin not removed: %v", err)
+	}
+}

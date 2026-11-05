@@ -61,3 +61,29 @@ func TestSaveWithoutFileFails(t *testing.T) {
 		t.Error("a State that was not loaded has nowhere to save to")
 	}
 }
+
+func TestRemoveState(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"atlas.json", "atlas.known_hosts", "broadway.json", "broadway.known_hosts"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := RemoveState(dir, "atlas"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var left []string
+	for _, e := range entries {
+		left = append(left, e.Name())
+	}
+	if want := []string{"broadway.json", "broadway.known_hosts"}; !reflect.DeepEqual(left, want) {
+		t.Errorf("left = %v, want %v", left, want)
+	}
+	if err := RemoveState(dir, "atlas"); err != nil {
+		t.Errorf("nothing to remove: %v", err)
+	}
+}

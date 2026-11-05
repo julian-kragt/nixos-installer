@@ -19,7 +19,7 @@ import (
 
 // resolveInputs asks for whatever the flags left empty (target, config, host) and
 // loads the persisted state of the chosen host, since state is keyed by host
-// name. in is completed in place.
+// name, after deleting it when in.Reinstall is set. in is completed in place.
 func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*pipeline.State, error) {
 	if err := showInstructions(ctx); err != nil {
 		return nil, err
@@ -44,6 +44,12 @@ func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*
 		}
 		in.Target, in.ConfigDir, in.Host = target, configDir, host
 
+		if in.Reinstall {
+			if err := pipeline.RemoveState(stateDir, host); err != nil {
+				return err
+			}
+			runner.Info(ctx, "Deleted the saved state and pinned host key of "+host)
+		}
 		st, err = pipeline.LoadState(stateDir, host)
 		if err != nil {
 			return err

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+
+	"installer/internal/machine"
 )
 
 // State is what must survive a restart of the installer, per host. Choices
@@ -33,6 +35,17 @@ func LoadState(dir, host string) (*State, error) {
 		return nil, fmt.Errorf("state: unmarshal %s: %w", s.path, err)
 	}
 	return s, nil
+}
+
+// RemoveState deletes what is saved for host: its state file and its host key
+// pin. The state goes first: a pin left behind only means a changed key to accept.
+func RemoveState(dir, host string) error {
+	for _, path := range []string{filepath.Join(dir, host+".json"), machine.NewHostPin(dir, host).File} {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("state: remove: %w", err)
+		}
+	}
+	return nil
 }
 
 // IsCompleted reports whether the stage with this ID is done.

@@ -62,6 +62,7 @@ i, err := runner.Choose(ctx, "Select a host to install:", items) // numbered lis
 - Ending a task closes still-running children as `✗ … (parent ended)`.
 - A task started under a parent that has already ended, or a message logged into a task that is already printed, gets its own entry at its indentation below everything that started before it. This only happens when a ctx outlives its task.
 - Output tail: 5 lines shown under a running task, dropped on success; on failure the last 20 lines are kept under the `✗`.
+- Errors: a failed task's error goes on rows of its own below the task, its children and its output, with its line breaks and indentation kept. A parent that returns a child's error unchanged, or joins its children's errors, does not repeat them; an error that adds to them is shown whole. The live area cuts these rows at the terminal width, the commit prints them in full. The log file has the error on one line.
 - Output writer: buffers partial lines, `\r` resets the line, strips ANSI/control chars.
 - Live area taller than the terminal: header, `… N lines`, newest lines; the commit prints everything.
 - `Ask`: the live area is frozen while a question is open. On a TTY the question and the answer are erased again afterwards, so log the answer if it should stay visible. `AskSecretTwice` keeps its first prompt on screen until both are answered. EOF with nothing typed is `io.EOF`; a last line without newline counts as an answer. Without a runner in `ctx`, or without `Options.In`, there is nobody to ask: `io.EOF`.

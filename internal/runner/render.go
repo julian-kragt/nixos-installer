@@ -158,6 +158,10 @@ func (r *Runner) collect(n *node, depth int, now time.Time, live bool, out *[]li
 	for _, c := range n.children {
 		r.collect(c, depth+1, now, live, out)
 	}
+
+	for _, s := range errorLines(n) {
+		*out = append(*out, line{depth: depth, sym: " ", text: s})
+	}
 }
 
 func logStyle(lv level, root bool) (sym, color string) {

@@ -156,22 +156,46 @@ func (r *Runner) endLocked(n *node, err error) {
 
 	sym, msg := "✓", fmtDuration(n.end.Sub(n.start))
 	if err != nil {
-		sym, msg = "✗", failedTitle(n)
+		sym, msg = "✗", oneLine(err.Error())
 	}
 	r.logToFile(sym, n, msg)
 }
 
-// failedTitle is the text of a failed task line.
+// failedTitle is the text of a failed task line. The error goes on the rows
+// below it, see errorLines.
 func failedTitle(n *node) string {
 	switch {
-	case n.err == nil:
-		return n.title
 	case errors.Is(n.err, errParentEnded):
 		return n.title + " (parent ended)"
 	case errors.Is(n.err, errClosed):
 		return n.title + " (runner closed)"
 	}
-	return n.title + ": " + oneLine(n.err.Error())
+	return n.title
+}
+
+// errorLines is the error of a failed task as printable rows, keeping its line
+// breaks and indentation. It is empty when the title already says it all, or
+// when the error says no more than the failed children show themselves.
+func errorLines(n *node) []string {
+	if n.state != stateFailed || errors.Is(n.err, errParentEnded) || errors.Is(n.err, errClosed) {
+		return nil
+	}
+	rest := n.err.Error()
+	for _, c := range n.children {
+		if c.state == stateFailed {
+			rest = strings.Replace(rest, c.err.Error(), "", 1)
+		}
+	}
+	if strings.TrimSpace(rest) == "" {
+		return nil
+	}
+	var rows []string
+	for _, s := range strings.Split(n.err.Error(), "\n") {
+		if s = strings.TrimRight(stripControl(s), " "); s != "" {
+			rows = append(rows, s)
+		}
+	}
+	return rows
 }
 
 // Run starts a task, runs fn with its context and ends the task.

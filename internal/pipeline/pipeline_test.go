@@ -105,7 +105,7 @@ func TestFailedStageStopsThePipelineAndIsNotRecorded(t *testing.T) {
 	if got := strings.Join(st.Completed, ","); got != "0.1" {
 		t.Fatalf("completed %s, want 0.1", got)
 	}
-	if !strings.Contains(out, "✗ 0.2 bad: boom") {
+	if !strings.Contains(out, "✗ 0.2 bad") || !strings.Contains(out, "\n  boom\n") {
 		t.Errorf("failure not shown:\n%s", out)
 	}
 }
@@ -131,7 +131,7 @@ func TestSaveFailureFailsTheStage(t *testing.T) {
 	if got := strings.Join(ran, ","); got != "1.0" {
 		t.Fatalf("ran %s, want the pipeline to stop behind 1.0", got)
 	}
-	if !strings.Contains(out.String(), "✗ 1.0 stage 1.0: persist state") {
+	if !strings.Contains(out.String(), "✗ 1.0 stage 1.0") || !strings.Contains(out.String(), "\n  persist state") {
 		t.Errorf("save failure not shown to the operator:\n%s", out.String())
 	}
 }

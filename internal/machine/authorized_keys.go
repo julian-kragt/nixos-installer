@@ -40,10 +40,11 @@ func installAuthorizedKeys(ctx context.Context, addr, password, authorizedKeys s
 		return errors.New("no host key pinned for " + pin.Host)
 	}
 	cfg := &ssh.ClientConfig{
-		User:            "root",
-		Auth:            []ssh.AuthMethod{ssh.Password(password)},
-		HostKeyCallback: ssh.FixedHostKey(pinned),
-		Timeout:         10 * time.Second,
+		User:              "root",
+		Auth:              []ssh.AuthMethod{ssh.Password(password)},
+		HostKeyAlgorithms: []string{pinned.Type()},
+		HostKeyCallback:   ssh.FixedHostKey(pinned),
+		Timeout:           10 * time.Second,
 	}
 
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)

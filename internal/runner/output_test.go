@@ -63,8 +63,8 @@ func TestFailureKeepsLastTwentyLines(t *testing.T) {
 	}
 	h.r.draw()
 	got := h.screen()
-	if len(got) != 21 || !strings.HasPrefix(got[0], "✗ Cmd: exit 1") ||
-		!strings.Contains(got[1], "out 11") || !strings.Contains(got[20], "out 30") {
+	if len(got) != 22 || !strings.HasPrefix(got[0], "✗ Cmd") ||
+		!strings.Contains(got[1], "out 11") || !strings.Contains(got[20], "out 30") || got[21] != "  exit 1" {
 		t.Fatalf("got:\n%s", strings.Join(got, "\n"))
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/rsa"
 	"io"
 	"net"
 	"os"
@@ -198,6 +199,38 @@ func TestInstallAuthorizedKeysChecksThePinBeforeThePassword(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := installAuthorizedKeys(ctx, addr, "pw", "ssh-ed25519 AAAA\n", pin); err != nil {
+		t.Fatalf("pinned key: %v", err)
+	}
+	if got := <-received; got != "ssh-ed25519 AAAA\n" {
+		t.Errorf("keys sent = %q", got)
+	}
+}
+
+// A NixOS ISO also has an RSA host key, which ssh's default algorithm order
+// prefers to the ed25519 key that is pinned.
+func TestInstallAuthorizedKeysAsksForThePinnedKeyType(t *testing.T) {
+	private, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rsaSigner, err := ssh.NewSignerFromKey(private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer := newSigner(t)
+	cfg := &ssh.ServerConfig{
+		PasswordCallback: func(ssh.ConnMetadata, []byte) (*ssh.Permissions, error) { return nil, nil },
+	}
+	cfg.AddHostKey(rsaSigner)
+	cfg.AddHostKey(signer)
+	received := make(chan string, 1)
+	addr := startSSHServer(t, cfg, received)
+	pin := NewHostPin(t.TempDir(), "atlas")
+	if err := pin.Save(signer.PublicKey()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installAuthorizedKeys(context.Background(), addr, "pw", "ssh-ed25519 AAAA\n", pin); err != nil {
 		t.Fatalf("pinned key: %v", err)
 	}
 	if got := <-received; got != "ssh-ed25519 AAAA\n" {
