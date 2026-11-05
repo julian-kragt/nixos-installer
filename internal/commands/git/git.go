@@ -109,16 +109,48 @@ func unmanagedChanges(dirty []string, prefix string, managed []string) []string 
 	return other
 }
 
-// add stages paths (relative to Dir). A flake ignores files git does not know.
-func (r Repo) add(ctx context.Context, paths ...string) error {
+// RequireInSync fetches and fails unless the current branch is level with its
+// upstream. Behind, a later push would be rejected; ahead, it would publish commits
+// the installer did not make.
+func (r Repo) RequireInSync(ctx context.Context) error {
+	if _, err := r.run(ctx, "fetch"); err != nil {
+		return err
+	}
+	out, err := r.run(ctx, "rev-list", "--left-right", "--count", "HEAD...@{upstream}")
+	if err != nil {
+		return err
+	}
+	var ahead, behind int
+	if _, err := fmt.Sscan(out, &ahead, &behind); err != nil {
+		return fmt.Errorf("parse git rev-list output %q: %w", out, err)
+	}
+	switch {
+	case behind > 0:
+		return fmt.Errorf("the branch of %s is %d commit(s) behind its upstream; pull first", r.Dir, behind)
+	case ahead > 0:
+		return fmt.Errorf("the branch of %s has %d unpushed commit(s); push them first", r.Dir, ahead)
+	}
+	return nil
+}
+
+// Add stages paths (relative to Dir). A flake ignores files git does not know.
+func (r Repo) Add(ctx context.Context, paths ...string) error {
 	_, err := r.run(ctx, append([]string{"add", "--"}, paths...)...)
 	return err
+}
+
+// Push pushes the current branch to its upstream.
+func (r Repo) Push(ctx context.Context) error {
+	if _, err := r.run(ctx, "push"); err != nil {
+		return fmt.Errorf("push %s: %w", r.Dir, err)
+	}
+	return nil
 }
 
 // Commit commits exactly paths (relative to Dir) with message, and only when
 // they differ from HEAD. It reports whether a commit was made.
 func (r Repo) Commit(ctx context.Context, message string, paths ...string) (bool, error) {
-	if err := r.add(ctx, paths...); err != nil {
+	if err := r.Add(ctx, paths...); err != nil {
 		return false, err
 	}
 	_, err := r.run(ctx, append([]string{"diff", "--cached", "--quiet", "--"}, paths...)...)

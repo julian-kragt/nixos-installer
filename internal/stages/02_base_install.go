@@ -49,10 +49,13 @@ func baseInstall(ctx context.Context, env *pipeline.Env) error {
 		return fmt.Errorf("the target runs neither the NixOS ISO nor %s; boot it from the NixOS ISO", env.Host)
 	}
 
-	return runner.Run(ctx, "Commit hardware config", func(ctx context.Context) error {
+	return runner.Run(ctx, "Commit and push hardware config", func(ctx context.Context) error {
 		message := fmt.Sprintf("chore(%s): update generated hardware config", env.Host)
-		_, err := configRepo(env).Commit(ctx, message, info.HardwareConfigPath)
-		return err
+		if _, err := configRepo(env).Commit(ctx, message, info.HardwareConfigPath); err != nil {
+			return err
+		}
+		// Also without a new commit: a re-run retries a push that failed.
+		return configRepo(env).Push(ctx)
 	})
 }
 

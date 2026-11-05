@@ -60,6 +60,20 @@ func TestEvalJSONRejectsGarbage(t *testing.T) {
 	}
 }
 
+func TestHardwareConfigPath(t *testing.T) {
+	args := fakeNix(t, `"hosts/a/hw.nix"`)
+	got, err := cfg.HardwareConfigPath(context.Background(), "atlas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := evalArgs("bootstrapEntries.atlas.hardwareConfigPath"); !slices.Equal(args(), want) {
+		t.Errorf("args = %q, want %q", args(), want)
+	}
+	if got != "hosts/a/hw.nix" {
+		t.Errorf("got %q", got)
+	}
+}
+
 func TestHostInfo(t *testing.T) {
 	args := fakeNix(t, `{"hardwareConfigPath":"hosts/a/hw.nix","rootAuthorizedKeys":["ssh-ed25519 AAAA me"],"system":"x86_64-linux","disks":{"main":"/dev/vda"},`+
 		`"users":{"auto":{"home":"/home/auto","uid":null},"fixed":{"home":"/data/fixed","uid":1500}}}`)

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"installer/internal/commands/hardwareconfig"
 	"installer/internal/commands/luks"
 	"installer/internal/commands/nix"
 	"installer/internal/machine"
@@ -18,17 +19,29 @@ import (
 
 // providerPreparation makes sure everything is in place before the target is
 // wiped, gets the operator's confirmation and delivers the LUKS passphrase. It
-// only reads from the target.
+// only reads from the target. A host without a hardware config gets one here,
+// because nothing about the host can be read until it exists.
 func providerPreparation(ctx context.Context, env *pipeline.Env) error {
+	var hardwareConfigPath string
 	var info nix.HostInfo
 	err := runner.RunSteps(ctx,
-		runner.Step{Title: "Read host data", Fn: func(ctx context.Context) (err error) {
-			info, err = configFlake(env).HostInfo(ctx, env.Host)
+		runner.Step{Title: "Find hardware config", Fn: func(ctx context.Context) (err error) {
+			hardwareConfigPath, err = configFlake(env).HardwareConfigPath(ctx, env.Host)
 			return err
 		}},
 		runner.Step{Title: "Check config repository", Fn: func(ctx context.Context) error {
 			// Only pushed config is installed in Phase 3. The installer changes these two itself.
-			return configRepo(env).RequireCommitted(ctx, info.HardwareConfigPath, "flake.lock")
+			if err := configRepo(env).RequireCommitted(ctx, hardwareConfigPath, "flake.lock"); err != nil {
+				return err
+			}
+			return configRepo(env).RequireInSync(ctx)
+		}},
+		runner.Step{Title: "Generate hardware config", Fn: func(ctx context.Context) error {
+			return hardwareconfig.Ensure(ctx, configRepo(env), env.Remote, hardwareConfigPath, env.GenerateHardware)
+		}},
+		runner.Step{Title: "Read host data", Fn: func(ctx context.Context) (err error) {
+			info, err = configFlake(env).HostInfo(ctx, env.Host)
+			return err
 		}},
 		runner.Step{Title: "Check SSH access to the installed system", Fn: func(ctx context.Context) error {
 			return checkBootstrapKeys(ctx, env, info.RootAuthorizedKeys)

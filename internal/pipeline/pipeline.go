@@ -19,6 +19,8 @@ type Inputs struct {
 	Target      string // IP address of the target machine
 	ConfigDir   string // absolute path to the config flake
 	SSHPassword string // root SSH password of the NixOS ISO for initial key bootstrap; prompts when empty
+	// GenerateHardware generates a missing hardware config without asking.
+	GenerateHardware bool
 }
 
 // Env is everything a stage needs besides its context. Parallel steps must

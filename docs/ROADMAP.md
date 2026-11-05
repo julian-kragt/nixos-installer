@@ -25,6 +25,7 @@ Replace `install-host.sh` and `just install | enroll-sops | deploy-remote` with 
 | Keys | One key per role, none shared across machines. Host: SSH host key, generated on the target by NixOS and used through `sops.age.sshKeyPaths`; its recipient is converted from the public key (1.1). User on a host: standalone age key created on the target (1.3), never derived from an SSH key. Operator: standalone age key on the provider, never copied to a target. |
 | §6.7 shared file | Moot: `shared.yaml` no longer exists. |
 | Disk | The device is set by hand in the host's disko layout in the config, committed and pushed. The installer does not choose a disk: stage 0.1 reads the devices from `<config>#installerData.<host>.disks`, requires each to be a block device on the target and fails with what to change. No `install.json`. |
+| Hardware config | The installer owns it, so a host needs no file before its first install. Stage 0.1 reads the path from `<config>#bootstrapEntries.<host>.hardwareConfigPath`, because `installerData` fails while the file is missing, and, once the operator confirms the path or passes `--generate-hardware`, generates a missing file from the target with `nixos-generate-config --no-filesystems --show-hardware-config`. Stage 0.2 regenerates it during the install, then commits and pushes it. Stage 0.1 refuses a config branch that is ahead of or behind its upstream, so the push cannot be rejected after the wipe or publish other commits. `--config` is a local directory only. |
 
 ## Order of work
 

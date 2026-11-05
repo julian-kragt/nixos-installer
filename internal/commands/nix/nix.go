@@ -60,6 +60,15 @@ func (c Config) HostInfo(ctx context.Context, host string) (HostInfo, error) {
 	return info, err
 }
 
+// HardwareConfigPath reads the path from the config's own entry, relative to the
+// config's root. installerData checks that the file exists, so it cannot tell where
+// a missing file belongs. Unchecked: the caller must not trust the value.
+func (c Config) HardwareConfigPath(ctx context.Context, host string) (string, error) {
+	var path string
+	err := c.eval(ctx, "bootstrapEntries."+host+".hardwareConfigPath", &path)
+	return path, err
+}
+
 // Hosts returns the hosts the config has an entry for.
 func (c Config) Hosts(ctx context.Context) ([]string, error) {
 	var hosts []string

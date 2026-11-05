@@ -12,8 +12,11 @@ func TestParseFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.Target != "192.168.1.100" || o.Host != "atlas" || o.ConfigDir != "" || !o.verbose {
+	if o.Target != "192.168.1.100" || o.Host != "atlas" || o.ConfigDir != "" || !o.verbose || o.GenerateHardware {
 		t.Fatalf("got %+v", o)
+	}
+	if o, err := parseFlags([]string{"--generate-hardware"}, &buf); err != nil || !o.GenerateHardware {
+		t.Fatalf("--generate-hardware: %+v %v", o, err)
 	}
 	empty, err := parseFlags(nil, &buf)
 	if err != nil || empty.Target != "" {

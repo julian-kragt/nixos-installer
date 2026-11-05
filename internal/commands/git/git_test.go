@@ -149,3 +149,82 @@ func TestCommitOnlyListedPathsAndOnlyOnDiff(t *testing.T) {
 		t.Fatalf("second: %v, %v; want no commit", done, err)
 	}
 }
+
+// pushFrom makes a commit in a second clone of dir's remote, so dir falls behind.
+func pushFrom(t *testing.T, dir string) {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "remote", "get-url", "origin").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := t.TempDir()
+	sh(t, other, "clone", "-q", strings.TrimSpace(string(out)), ".")
+	write(t, other, "elsewhere", "1")
+	sh(t, other, "add", ".")
+	sh(t, other, "commit", "-q", "-m", "elsewhere")
+	sh(t, other, "push", "-q")
+}
+
+func TestRequireInSync(t *testing.T) {
+	t.Run("level", func(t *testing.T) {
+		dir := newRepo(t)
+		pushed(t, dir)
+		if err := (Repo{machine.Local(), dir}).RequireInSync(ctx); err != nil {
+			t.Errorf("err = %v", err)
+		}
+	})
+	t.Run("ahead", func(t *testing.T) {
+		dir := newRepo(t)
+		pushed(t, dir)
+		write(t, dir, "b", "2")
+		sh(t, dir, "commit", "-q", "-am", "local")
+		err := Repo{machine.Local(), dir}.RequireInSync(ctx)
+		if err == nil || !strings.Contains(err.Error(), "1 unpushed commit") {
+			t.Errorf("err = %v", err)
+		}
+	})
+	t.Run("behind", func(t *testing.T) {
+		dir := newRepo(t)
+		pushed(t, dir)
+		pushFrom(t, dir)
+		err := Repo{machine.Local(), dir}.RequireInSync(ctx)
+		if err == nil || !strings.Contains(err.Error(), "1 commit(s) behind") {
+			t.Errorf("err = %v", err)
+		}
+	})
+}
+
+func TestPush(t *testing.T) {
+	dir := newRepo(t)
+	pushed(t, dir)
+	r := Repo{machine.Local(), dir}
+	write(t, dir, "b", "2")
+	if done, err := r.Commit(ctx, "msg", "b"); err != nil || !done {
+		t.Fatalf("commit: %v, %v", done, err)
+	}
+
+	if err := r.Push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RequireInSync(ctx); err != nil {
+		t.Errorf("after push: %v", err)
+	}
+	if err := r.Push(ctx); err != nil {
+		t.Errorf("push with nothing new: %v", err)
+	}
+}
+
+func TestPushRejectedNamesTheRepo(t *testing.T) {
+	dir := newRepo(t)
+	pushed(t, dir)
+	pushFrom(t, dir)
+	r := Repo{machine.Local(), dir}
+	write(t, dir, "b", "2")
+	if _, err := r.Commit(ctx, "msg", "b"); err != nil {
+		t.Fatal(err)
+	}
+	err := r.Push(ctx)
+	if err == nil || !strings.Contains(err.Error(), dir) {
+		t.Errorf("err = %v, want it to name %s", err, dir)
+	}
+}
