@@ -1,4 +1,4 @@
-// Package nix evaluates nixos-bootstrap's outputs for the config flake.
+// Package nix evaluates the outputs nixos-bootstrap adds to the config flake.
 package nix
 
 import (
@@ -23,18 +23,11 @@ func EvalJSON(ctx context.Context, m pipeline.Machine, installable string, out a
 	return nil
 }
 
-// Flakes names the nixos-bootstrap flake and the config flake it is evaluated
-// for. Config is an absolute path, so nix finds the repository around it.
-type Flakes struct {
-	Bootstrap string
-	Config    string
-}
-
-// eval evaluates attr of the bootstrap flake with its `config` input set to
-// f.Config. It never writes the bootstrap flake's lock file.
-func (f Flakes) eval(ctx context.Context, m pipeline.Machine, attr string, out any, extra ...string) error {
-	args := append([]string{"--override-input", "config", f.Config, "--no-write-lock-file"}, extra...)
-	return EvalJSON(ctx, m, f.Bootstrap+"#"+attr, out, args...)
+// eval evaluates attr of the config flake. config is an absolute path, so nix
+// finds the repository around it. It never writes the config's lock file.
+func eval(ctx context.Context, m pipeline.Machine, config, attr string, out any, extra ...string) error {
+	args := append([]string{"--no-write-lock-file"}, extra...)
+	return EvalJSON(ctx, m, config+"#"+attr, out, args...)
 }
 
 // HostInfo is nixos-bootstrap's installerData.<host>: the config's entry for
@@ -53,24 +46,24 @@ type User struct {
 }
 
 // EvalHostInfo evaluates `installerData.<host>`.
-func EvalHostInfo(ctx context.Context, m pipeline.Machine, f Flakes, host string) (HostInfo, error) {
+func EvalHostInfo(ctx context.Context, m pipeline.Machine, config, host string) (HostInfo, error) {
 	var info HostInfo
-	err := f.eval(ctx, m, "installerData."+host, &info)
+	err := eval(ctx, m, config, "installerData."+host, &info)
 	return info, err
 }
 
 // ListHosts returns the hosts the config has an entry for.
-func ListHosts(ctx context.Context, m pipeline.Machine, f Flakes) ([]string, error) {
+func ListHosts(ctx context.Context, m pipeline.Machine, config string) ([]string, error) {
 	var hosts []string
-	err := f.eval(ctx, m, "installerData", &hosts, "--apply", "builtins.attrNames")
+	err := eval(ctx, m, config, "installerData", &hosts, "--apply", "builtins.attrNames")
 	return hosts, err
 }
 
 // EvalDisks returns the devices of the host's disko layout, by disk name.
 // It reads the bootstrap system; installerData.<host>.disks holds the same map.
-func EvalDisks(ctx context.Context, m pipeline.Machine, f Flakes, host string) (map[string]string, error) {
+func EvalDisks(ctx context.Context, m pipeline.Machine, config, host string) (map[string]string, error) {
 	var disks map[string]string
-	err := f.eval(ctx, m, "nixosConfigurations."+host+".config.disko.devices.disk", &disks,
+	err := eval(ctx, m, config, "nixosConfigurations."+host+"-bootstrap.config.disko.devices.disk", &disks,
 		"--apply", "builtins.mapAttrs (_: d: d.device)")
 	return disks, err
 }
@@ -78,7 +71,7 @@ func EvalDisks(ctx context.Context, m pipeline.Machine, f Flakes, host string) (
 // CheckBootstrapSystem evaluates the host's whole bootstrap system. installerData
 // only checks the entry's fields; this also runs disko's options, NixOS's
 // assertions and the hardware config.
-func CheckBootstrapSystem(ctx context.Context, m pipeline.Machine, f Flakes, host string) error {
+func CheckBootstrapSystem(ctx context.Context, m pipeline.Machine, config, host string) error {
 	var drvPath string
-	return f.eval(ctx, m, "nixosConfigurations."+host+".config.system.build.toplevel.drvPath", &drvPath)
+	return eval(ctx, m, config, "nixosConfigurations."+host+"-bootstrap.config.system.build.toplevel.drvPath", &drvPath)
 }

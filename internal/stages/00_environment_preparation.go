@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -11,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 
 	"installer/internal/pipeline"
 	"installer/internal/runner"
@@ -27,6 +30,13 @@ func environmentPreparation(ctx context.Context, env *pipeline.Env) error {
 		runner.Step{Title: "Check target is reachable", Fn: func(ctx context.Context) error {
 			return dialTCP(ctx, net.JoinHostPort(env.Target, "22"))
 		}},
+		runner.Step{Title: "Check SSH host key", Fn: func(ctx context.Context) error {
+			offered, err := pipeline.ScanHostKey(ctx, env.Target)
+			if err != nil {
+				return fmt.Errorf("read the host key of %s: %w", env.Target, err)
+			}
+			return checkHostKey(ctx, env, offered)
+		}},
 		runner.Step{Title: "Set up SSH access", Fn: func(ctx context.Context) error {
 			return setupSSHAccess(ctx, env)
 		}},
@@ -36,17 +46,59 @@ func environmentPreparation(ctx context.Context, env *pipeline.Env) error {
 	)
 }
 
+// checkHostKey pins the key the target offers at first contact, so nothing is
+// sent to a swapped target later on. A different key is refused once the base
+// install (0.2) is done. Before that the operator can accept it, because the
+// key changes for ordinary reasons: every ISO boot makes a new one, and an
+// interrupted 0.2 may already have installed the system.
+func checkHostKey(ctx context.Context, env *pipeline.Env, offered ssh.PublicKey) error {
+	pinned, err := env.Pin.Load()
+	if err != nil {
+		return err
+	}
+	if pinned == nil {
+		runner.Info(ctx, fmt.Sprintf("Pinned the host key of %s: %s", env.Target, pipeline.Fingerprint(offered)))
+		return env.Pin.Save(offered)
+	}
+	if pipeline.SameKey(pinned, offered) {
+		return nil
+	}
+
+	change := fmt.Sprintf("the host key of %s changed\n  pinned: %s\n  target: %s",
+		env.Target, pipeline.Fingerprint(pinned), pipeline.Fingerprint(offered))
+	if slices.Contains(env.State.Completed, "0.2") {
+		return fmt.Errorf("%s\nthis is not the system that was installed; if you reinstalled it on purpose, remove %s and %s to start over",
+			change, env.Pin.File, env.State.Path())
+	}
+	runner.Warn(ctx, change)
+	answer, err := runner.Ask(ctx, "If you rebooted the ISO or the install was interrupted, type 'trust' to accept the new key: ")
+	if errors.Is(err, io.EOF) {
+		return errors.New(change)
+	}
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(answer) != "trust" {
+		return errors.New("aborted: the new host key was not accepted")
+	}
+	return env.Pin.Save(offered)
+}
+
 // setupSSHAccess makes key auth to the target work. When it does not yet, the
-// provider's public keys are installed with the root password, but only while
-// the target is still the ISO: once the base install (0.2) is done the root
-// password is gone and a failed key login is an error.
+// provider's public keys are installed with the root password, but only on an
+// ISO that offers password login. The installed system takes only the keys in
+// rootAuthorizedKeys, so there a failed key login is an error, also when an
+// interrupted base install (0.2) was not recorded.
 func setupSSHAccess(ctx context.Context, env *pipeline.Env) error {
 	_, keyAuthErr := env.Remote.Run(ctx, "true")
 	if keyAuthErr == nil {
 		return nil // key auth already works
 	}
-	if !isSSHAuthError(keyAuthErr) || slices.Contains(env.State.Completed, "0.2") {
+	if !isSSHAuthError(keyAuthErr) {
 		return keyAuthErr
+	}
+	if slices.Contains(env.State.Completed, "0.2") || !offersPassword(keyAuthErr) {
+		return fmt.Errorf("%w\n\n%s", keyAuthErr, keyOnlyHint)
 	}
 
 	password := env.SSHPassword
@@ -64,7 +116,7 @@ func setupSSHAccess(ctx context.Context, env *pipeline.Env) error {
 	if err != nil {
 		return err
 	}
-	err = pipeline.BootstrapKey(ctx, env.Target, password, keys)
+	err = pipeline.InstallAuthorizedKeys(ctx, env.Target, password, keys, env.Pin)
 	if errors.Is(err, pipeline.ErrAuth) {
 		return fmt.Errorf("%w\n\n%s", err, passwordRejectedHint)
 	}
@@ -77,7 +129,10 @@ func setupSSHAccess(ctx context.Context, env *pipeline.Env) error {
 	return nil
 }
 
-const passwordRejectedHint = "Hint: the target rejected password auth. Set a root password first:\n  passwd root"
+const (
+	passwordRejectedHint = "Hint: the target rejected password auth. Set a root password first:\n  passwd root"
+	keyOnlyHint          = "Hint: root on the target logs in with a key only. Load one of the host's rootAuthorizedKeys:\n  ssh-add"
+)
 
 // collectProviderKeys returns the SSH public keys the provider should use,
 // preferring keys loaded in the SSH agent (ssh-add -L), with a fallback to
@@ -115,6 +170,18 @@ func collectProviderKeys(ctx context.Context, local pipeline.Machine) (string, e
 // parenthesised method list: "Permission denied (publickey,password)".
 func isSSHAuthError(err error) bool {
 	return strings.Contains(err.Error(), "Permission denied (")
+}
+
+// offersPassword reports whether the method list of an SSH authentication
+// failure includes password, the method InstallAuthorizedKeys uses. The
+// installed system lists only publickey.
+func offersPassword(err error) bool {
+	_, rest, ok := strings.Cut(err.Error(), "Permission denied (")
+	if !ok {
+		return false
+	}
+	methods, _, _ := strings.Cut(rest, ")")
+	return slices.Contains(strings.Split(methods, ","), "password")
 }
 
 func dialTCP(ctx context.Context, addr string) error {

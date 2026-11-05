@@ -31,12 +31,12 @@ func fakeNix(t *testing.T, body string) func() []string {
 	}
 }
 
-var flakes = Flakes{Bootstrap: "github:o/b", Config: "/home/me/config"}
+const config = "/home/me/config"
 
-// evalArgs is the command line every eval of flakes runs, before extra.
+// evalArgs is the command line every eval of config runs, before extra.
 func evalArgs(attr string, extra ...string) []string {
-	return append([]string{"eval", "--json", "github:o/b#" + attr,
-		"--override-input", "config", "/home/me/config", "--no-write-lock-file"}, extra...)
+	return append([]string{"eval", "--json", config + "#" + attr,
+		"--no-write-lock-file"}, extra...)
 }
 
 func TestEvalJSONIgnoresStderr(t *testing.T) {
@@ -61,7 +61,7 @@ func TestEvalJSONRejectsGarbage(t *testing.T) {
 func TestEvalHostInfo(t *testing.T) {
 	args := fakeNix(t, `{"hardwareConfigPath":"hosts/a/hw.nix","rootAuthorizedKeys":["ssh-ed25519 AAAA me"],"system":"x86_64-linux",`+
 		`"users":{"auto":{"home":"/home/auto","uid":null},"fixed":{"home":"/data/fixed","uid":1500}}}`)
-	got, err := EvalHostInfo(context.Background(), pipeline.Machine{}, flakes, "atlas")
+	got, err := EvalHostInfo(context.Background(), pipeline.Machine{}, config, "atlas")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestEvalHostInfo(t *testing.T) {
 
 func TestListHosts(t *testing.T) {
 	args := fakeNix(t, `["atlas","broadway"]`)
-	got, err := ListHosts(context.Background(), pipeline.Machine{}, flakes)
+	got, err := ListHosts(context.Background(), pipeline.Machine{}, config)
 	if err != nil || !slices.Equal(got, []string{"atlas", "broadway"}) {
 		t.Fatalf("got %q, %v", got, err)
 	}
@@ -92,11 +92,11 @@ func TestListHosts(t *testing.T) {
 
 func TestEvalDisks(t *testing.T) {
 	args := fakeNix(t, `{"main":"/dev/nvme0n1"}`)
-	got, err := EvalDisks(context.Background(), pipeline.Machine{}, flakes, "atlas")
+	got, err := EvalDisks(context.Background(), pipeline.Machine{}, config, "atlas")
 	if err != nil || got["main"] != "/dev/nvme0n1" {
 		t.Fatalf("got %v, %v", got, err)
 	}
-	want := evalArgs("nixosConfigurations.atlas.config.disko.devices.disk", "--apply", "builtins.mapAttrs (_: d: d.device)")
+	want := evalArgs("nixosConfigurations.atlas-bootstrap.config.disko.devices.disk", "--apply", "builtins.mapAttrs (_: d: d.device)")
 	if !slices.Equal(args(), want) {
 		t.Errorf("args = %q, want %q", args(), want)
 	}
@@ -104,10 +104,10 @@ func TestEvalDisks(t *testing.T) {
 
 func TestCheckBootstrapSystem(t *testing.T) {
 	args := fakeNix(t, `"/nix/store/x.drv"`)
-	if err := CheckBootstrapSystem(context.Background(), pipeline.Machine{}, flakes, "atlas"); err != nil {
+	if err := CheckBootstrapSystem(context.Background(), pipeline.Machine{}, config, "atlas"); err != nil {
 		t.Fatal(err)
 	}
-	if want := evalArgs("nixosConfigurations.atlas.config.system.build.toplevel.drvPath"); !slices.Equal(args(), want) {
+	if want := evalArgs("nixosConfigurations.atlas-bootstrap.config.system.build.toplevel.drvPath"); !slices.Equal(args(), want) {
 		t.Errorf("args = %q, want %q", args(), want)
 	}
 }

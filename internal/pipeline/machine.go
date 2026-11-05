@@ -20,14 +20,16 @@ type Machine struct {
 }
 
 // SSH returns the root account on the machine at addr, authenticating via
-// ssh-agent and ~/.ssh keys. BatchMode=yes prevents interactive prompts.
-// TODO: replace StrictHostKeyChecking=no with TOFU once host key pinning is implemented.
-func SSH(addr string) Machine {
+// ssh-agent and ~/.ssh keys. Only the key in pin is accepted for it. BatchMode=yes
+// prevents interactive prompts.
+func SSH(addr string, pin HostPin) Machine {
 	return Machine{ssh: []string{
 		"ssh",
 		"-o", "ConnectTimeout=10",
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "StrictHostKeyChecking=yes",
+		"-o", "HostKeyAlias=" + pin.Host,
+		"-o", `UserKnownHostsFile="` + pin.File + `"`,
+		"-o", "GlobalKnownHostsFile=/dev/null",
 		"-o", "LogLevel=ERROR",
 		"-o", "BatchMode=yes",
 		"-l", "root", addr,

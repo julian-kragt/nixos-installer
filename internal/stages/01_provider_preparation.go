@@ -24,7 +24,6 @@ var diskPasswordPath = "/tmp/disko-password"
 // wiped, collects the host facts later stages need, gets the operator's
 // confirmation and delivers the LUKS passphrase. It only reads from the target.
 func providerPreparation(ctx context.Context, env *pipeline.Env) error {
-	flakes := nix.Flakes{Bootstrap: env.Bootstrap, Config: env.ConfigDir}
 	var disk string
 	var info nix.HostInfo
 	err := runner.RunSteps(ctx,
@@ -33,7 +32,7 @@ func providerPreparation(ctx context.Context, env *pipeline.Env) error {
 			return err
 		}},
 		runner.Step{Title: "Read host data", Fn: func(ctx context.Context) (err error) {
-			info, err = nix.EvalHostInfo(ctx, env.Local, flakes, env.Host)
+			info, err = nix.EvalHostInfo(ctx, env.Local, env.ConfigDir, env.Host)
 			return err
 		}},
 		runner.Step{Title: "Check config repository", Fn: func(ctx context.Context) error {
@@ -43,10 +42,10 @@ func providerPreparation(ctx context.Context, env *pipeline.Env) error {
 			return checkBootstrapKeys(ctx, env, info.RootAuthorizedKeys)
 		}},
 		runner.Step{Title: "Check bootstrap system", Fn: func(ctx context.Context) error {
-			return nix.CheckBootstrapSystem(ctx, env.Local, flakes, env.Host)
+			return nix.CheckBootstrapSystem(ctx, env.Local, env.ConfigDir, env.Host)
 		}},
 		runner.Step{Title: "Check config installs to the disk", Fn: func(ctx context.Context) error {
-			devices, err := nix.EvalDisks(ctx, env.Local, flakes, env.Host)
+			devices, err := nix.EvalDisks(ctx, env.Local, env.ConfigDir, env.Host)
 			if err != nil {
 				return err
 			}

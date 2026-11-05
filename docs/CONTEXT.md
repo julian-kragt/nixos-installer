@@ -17,8 +17,8 @@ All are siblings under `~/projects/nix/` on the provider (workhorse), except nix
 
 | Repo | Local path | Remote | Role in pipeline |
 |---|---|---|---|
-| nixos-config | `../nixos-config` | `git@github.com:JulianKragt/nixos-config.git` | Source of host definitions, `hostSpec`, users and the `bootstrap.<host>` entries. Rebuilt in Phase 3. |
-| nixos-bootstrap | `../nixos-bootstrap` | `git@github.com:julian-kragt/nixos-bootstrap.git` | Generic flake with the first, minimal system of a host. Installed in 0.2; `installerData.<host>` is what the installer reads. |
+| nixos-config | `../nixos-config` | `git@github.com:JulianKragt/nixos-config.git` | Source of host definitions, `hostSpec`, users and the `bootstrapEntries.<host>` entries. Rebuilt in Phase 3. |
+| nixos-bootstrap | `../nixos-bootstrap` | `git@github.com:julian-kragt/nixos-bootstrap.git` | Generic flake with the first, minimal system of a host, an input of the config. Installed in 0.2; `installerData.<host>`, which it adds to the config, is what the installer reads. |
 | nix-secrets | none | `git@github.com:JulianKragt/nix-secrets.git` (private) | `.sops.yaml` recipients + encrypted YAML. Setup only today; written in Phase 2. |
 | installer | this repo | `git@github.com:julian-kragt/nixos-installer.git` | Go module `installer`, Go 1.27 (`nix develop`). Replaces `install-host.sh`. |
 
@@ -26,11 +26,11 @@ All are siblings under `~/projects/nix/` on the provider (workhorse), except nix
 
 ## Users — one way to add or remove
 
-The users on a host are the files `home/<u>/<host>.nix` (`usersForHost` in `config/lib/helpers.nix` → `accounts.activeUsers`). Per-user policy lives in `accounts.users.<u>` (full config; today only `secrets`, default true). Install behaviour (hardware generation, SOPS enrollment, deploy, timeouts) is installer flags, not Nix.
+The users on a host are the files `home/<u>/<host>.nix` (`usersForHost` in `config/lib/helpers.nix` → `accounts.activeUsers`). Per-user policy lives in `accounts.users.<u>` (full config; today only `secrets`, default true). Install behaviour (hardware generation, SOPS enrollment, deploy, timeouts) belongs to the installer, not Nix.
 
 - **Add**: create `home/<u>/<host>.nix` (+ `accounts/<u>/keys` if new to the repo), commit. **Delete**: remove the file, commit.
 - **Apply** (planned, stage 4.2): `installer secrets --host <h> --target <ip>`. First install runs the same reconcile as later changes.
-- **Reconcile** = `users` from `<bootstrap>#installerData.<h>` (ROADMAP "Plumbing design", Users) vs. `host-users/*`: add recipient + author `host-users/<h>-<u>.yaml` + commit/push for new users; prune file and recipient for removed users; then rebuild. The secret file must exist before the rebuild (`mutableUsers = false`).
+- **Reconcile** = `users` from `<config>#installerData.<h>` (ROADMAP "Plumbing design", Users) vs. `host-users/*`: add recipient + author `host-users/<h>-<u>.yaml` + commit/push for new users; prune file and recipient for removed users; then rebuild. The secret file must exist before the rebuild (`mutableUsers = false`).
 - Not supported: `useradd`/`userdel` on the box; hand-editing recipients to add a user.
 - Kinds: primary admin and additional human users (password + keys + Home Manager), shared login account (`media`, sops password), service users (`isSystemUser`, from service modules, invisible to the installer), operator/root key lists (`accounts/super/keys`, not accounts).
 
@@ -40,26 +40,27 @@ The users on a host are the files `home/<u>/<host>.nix` (`usersForHost` in `conf
 
 ### Flake shape
 - flake-parts "dendritic" layout; every fragment is listed explicitly in `imports.nix` (new host files must be added there).
-- Two flakes give a host its two systems. The config's `bootstrap/` entries (`bootstrap.<host>`) feed nixos-bootstrap, with the config passed as its `config` input:
-  - `<bootstrap>#nixosConfigurations.<host>` → the minimal first install: root SSH, disko, hardware config and the tools an installer needs
+- The config flake gives a host its two systems. Its `bootstrap/` entries (`bootstrapEntries.<host>`) feed nixos-bootstrap, an input of the config, which adds the first system to the config's outputs:
+  - `<config>#nixosConfigurations.<host>-bootstrap` → the minimal first install: root SSH, disko, hardware config and the tools an installer needs
   - `<config>#nixosConfigurations.<host>` → full system (host-spec, core/sops, users, home-manager…)
-- Host is a valid install target iff it is an entry of the config's `bootstrap` output (`nix.ListHosts`).
+- Host is a valid install target iff it is an entry of the config's `bootstrapEntries` output (`nix.ListHosts`).
 - Hosts today: `atlas` (NixOS workstation, `/dev/nvme0n1`, already installed once), `broadway` (NixOS server, disk still `REPLACE_ME_BEFORE_INSTALL`, users jkragt + media), `workhorse` (darwin), `wsl`.
 
-### Host discovery (`bootstrap/default.nix` in config, `installerData` in nixos-bootstrap)
-`provisionSpec`, `installHosts` and the config's `installer/` adapter were removed. `nix eval --json <bootstrap>#installerData.<host> --override-input config <ConfigDir> --no-write-lock-file` returns `{ system, users, rootAuthorizedKeys, hardwareConfigPath, disks }` (`users` maps each normal user to `{ name, uid, home }`, `disks` each disk of the layout to its device). Go: `nix.EvalHostInfo` reads all but `disks` and `users.<u>.name`; `nix.EvalDisks` reads the devices from the bootstrap system. The former install-policy options now live in the installer:
+### Host discovery (`bootstrap/default.nix` in config, `installerData` from nixos-bootstrap)
+`provisionSpec`, `installHosts` and the config's `installer/` adapter were removed. `nix eval --json <ConfigDir>#installerData.<host> --no-write-lock-file` returns `{ system, users, rootAuthorizedKeys, hardwareConfigPath, disks }` (`users` maps each normal user to `{ name, uid, home }`, `disks` each disk of the layout to its device). Go: `nix.EvalHostInfo` reads all but `disks` and `users.<u>.name`; `nix.EvalDisks` reads the devices from the bootstrap system. The former install-policy options now live in the installer:
 
 | Former option | Now |
 |---|---|
-| `generateHardware`, `hardwareConfigPath` | flag / the entry's `hardwareConfigPath` |
+| `generateHardware`, `sshWaitTimeout` | fixed in stage 0.2: always generated, 15 minutes |
+| `hardwareConfigPath` | the entry's `hardwareConfigPath` |
 | `luksPasswordFile` | fixed `/tmp/disko-password` (matches `disko.nix`) |
-| `enrollSops`, `pushSecrets`, `deployFullConfig`, `sshWaitTimeout`, `nixosAnywhereExtra`, `nixSecretsPath` | installer flags with defaults |
+| `enrollSops`, `pushSecrets`, `deployFullConfig`, `nixosAnywhereExtra`, `nixSecretsPath` | installer flags with defaults |
 | `provisionUserAgeKey` | dropped (obsolete, see §6.2) |
 
 The bootstrap system also sets systemd-boot and root SSH keys, includes git / sops / age / ssh-to-age / vim, enables the nix features an installer needs, and knows the github.com host key.
 
 ### Other useful evaluations
-- Disks: `nix eval --json <bootstrap>#nixosConfigurations.<host>.config.disko.devices.disk --apply 'builtins.mapAttrs (_: d: d.device)' --override-input config <ConfigDir>` (`nix.EvalDisks`); a `REPLACE_ME` device fails the comparison in 0.1.
+- Disks: `nix eval --json <ConfigDir>#nixosConfigurations.<host>-bootstrap.config.disko.devices.disk --apply 'builtins.mapAttrs (_: d: d.device)'` (`nix.EvalDisks`); a `REPLACE_ME` device fails the comparison in 0.1.
 - Users on a host: `users` in `installerData.<host>`.
 
 ### Disk / boot facts that affect the flow
@@ -113,20 +114,22 @@ What the old setup got wrong, which the installer must not reintroduce:
 
 ```
 cmd/nixos-installer/     main.go    signals, log file, runner, wiring
-                         flags.go   --target --host --config --bootstrap --disk --ssh-password --verbose
+                         flags.go   --target --host --config --disk --ssh-password --verbose
                          inputs.go  asks for what the flags left empty, loads the host's state
 internal/runner/         live task tree, log file, questions to the operator; see docs/RUNNER.md
 internal/pipeline/       the engine every stage uses
-                         pipeline.go  Inputs, Env, Stage, Run (resume loop)
-                         machine.go   Machine: run a command here or on the target over ssh
-                         bootstrap.go BootstrapKey: install the provider's keys on the target with the root password
-                         state.go     State, LoadState, Save
-internal/nix/             nix eval of <bootstrap>#installerData, hosts, disks, the bootstrap system
+                         pipeline.go        Inputs, Env, Stage, Run (resume loop)
+                         machine.go         Machine: run a command here or on the target over ssh
+                         authorized_keys.go InstallAuthorizedKeys: install the provider's keys on the target with the root password
+                         hostkey.go         HostPin, ScanHostKey: the one SSH host key trusted for a host
+                         state.go           State, LoadState, Save
+internal/nix/             nix eval of <config>#installerData, hosts, disks, the bootstrap system
 internal/git/            prefix, upstream, dirty paths, add, commit
 internal/stages/         one file per stage, nothing else
                          stages.go    All: the ordered stage list
                          00_environment_preparation.go
                          01_provider_preparation.go
+                         02_base_install.go
 ```
 
 How a run goes: `main` parses the flags into `pipeline.Inputs`, `resolveInputs` asks for the missing target and host and loads `<state dir>/<host>.json`, then `pipeline.Run(ctx, env, stages.All)` runs the stages in list order. A stage whose ID is in `State.Completed` is skipped; every other stage is recorded and the state saved when it succeeds. A stage with `Always: true` (0.0) runs every time and is never recorded.
@@ -160,9 +163,9 @@ Legacy = `install-host.sh` at `06dd040` in nixos-config.
 
 | Pipeline stage | Runs on | Legacy `install-host.sh` equivalent | Port notes |
 |---|---|---|---|
-| 0.0 Environment preparation | provider (+target) | arg parsing, tool checks | Built. Always runs (not recorded in `State.Completed`). Checks local tools, internet, target reachable on :22, SSH access (installs the provider's keys with the root password while 0.2 is not in `Completed`), config flake. |
+| 0.0 Environment preparation | provider (+target) | arg parsing, tool checks | Built. Always runs (not recorded in `State.Completed`). Checks local tools, internet, target reachable on :22, SSH access (installs the provider's keys with the root password while 0.2 is not in `Completed` and the target offers password login; the installed system takes keys only), config flake. |
 | 0.1 Provider preparation | provider (+target checks) | preflight: disk not `REPLACE_ME`, ping, `ssh root@ip`, remote `nix`/`lsblk`/internet check, `test -b $DEVICE`, show `lsblk`, type "install", LUKS prompt → `/tmp/disko-password` | Built. Disk from `--disk`, else the non-removable whole disks on the target: the one recorded by an earlier run, a lone disk, or the operator's pick; compared with the config's disko device after `readlink -f`. Also checks the config repo, the bootstrap keys and system, and the target. Shows the disk, takes a typed confirmation, streams the LUKS passphrase via stdin. |
-| 0.2 Base install | provider → target | `nix run github:nix-community/nixos-anywhere -- [--generate-hardware-config …] --build-on-remote --flake <wrapper flake>#<host> --target-host root@ip`; commit hardware config; skip if `/run/current-system` exists (a check that never worked) | Then wait for SSH (`--ssh-wait-timeout`, poll 5s), TOFU then pin ed25519 host key → state. |
+| 0.2 Base install | provider → target | `nix run github:nix-community/nixos-anywhere -- [--generate-hardware-config …] --build-on-remote --flake <config>#<host>-bootstrap --target-host root@ip`; commit hardware config; skip if `/run/current-system` exists (a check that never worked) | Built. Only from the ISO: its `VARIANT_ID=installer` makes nixos-anywhere (pinned at 1.13.0) skip kexec, so `/tmp/disko-password` from 0.1 survives and `--disk-encryption-keys` is not needed. Any other system that is not the host is refused. Then wait for SSH (up to 15 minutes, poll 5s), accept only a key that differs from the ISO's, pin it → state. |
 | 1.1 Host identity | target | `cat /etc/ssh/ssh_host_ed25519_key.pub \| ssh-to-age` (run on provider) | Can be done in Go with `github.com/Mic92/ssh-to-age` (library) — no tool needed. Store the recipient in state; the fingerprint comes from 0.2. |
 | 1.2 Readiness | target | partial (internet ping) | Add `git ls-remote`-style GitHub reachability + `git sops vim nix` presence. |
 | 1.3 User identity | target | — (copied the operator key to the target) | New: a standalone age key per user on the host, created on the target. |
@@ -199,10 +202,10 @@ The numbers are the ones the roadmap and the stage prompts refer to. The roadmap
 
 ## 7. Direction for the Go code
 
-- **State**: `pipeline.State`, JSON per host in `~/.local/state/nixos-installer/<host>.json`, saved after every stage. Has `Host`, `Disk`, `Completed`. To add as stages need them (no user list: stages read `installerData.<host>` themselves, see ROADMAP "Plumbing design"): `HostKeyFingerprint`, `HostRecipient`, `UserRecipients map[string]string`, `SecretsCommit`, `ConfigRev`. No phase marker: `Completed` says whether 1.2 and 3.3 are done (ROADMAP "Plumbing design", Phase).
+- **State**: `pipeline.State`, JSON per host in `~/.local/state/nixos-installer/<host>.json`, saved after every stage. Has `Host`, `Disk`, `Completed`, `HostKeyFingerprint`. To add as stages need them (no user list: stages read `installerData.<host>` themselves, see ROADMAP "Plumbing design"): `HostRecipient`, `UserRecipients map[string]string`, `SecretsCommit`, `ConfigRev`. No phase marker: `Completed` says whether 1.2 and 3.3 are done (ROADMAP "Plumbing design", Phase).
 - **Stage IDs**: strings matching the Pipeline (`"0.1"`, `"2.3"`…); the order is the order of `stages.All`; resume = skip what is in `State.Completed`.
 - **Machines**: `pipeline.Machine` runs a command locally or through the system `ssh`, with stderr streamed to the runner, stdin for secrets (`RunStdin`) and `Quiet()` for commands that print secrets. Still to add with the stage that needs it: an interactive mode (`ssh -t`, attach the terminal, stop the spinner first) for vim.
-- **Host key**: `pipeline.SSH` still disables host key checking (TODO in `machine.go`). Stage 0.2 should pin the key (TOFU into a known_hosts file under the state dir) by extending that option list, and pass the same options to nixos-anywhere / nixos-rebuild so there is one SSH configuration.
-- **Tool helpers**: `internal/nix` and `internal/git` exist. To add, each in its own package once a second stage needs it (§4): `nixos-anywhere`, `ssh-keyscan`, `sops`, `nixos-rebuild`. Do ssh→age conversion and `.sops.yaml` editing in-process.
-- **CLI** (`cmd/nixos-installer/flags.go`, `inputs.go`): `--target` (prompted when empty; IPv4, IPv6, or link-local IPv6 with zone such as `fe80::1%eth0`), `--host` (picked from the config's `bootstrap` output when empty), `--config` (prompted when empty), `--bootstrap` (flake reference, default `github:julian-kragt/nixos-bootstrap`), `--disk` (picked on the target when empty), `--ssh-password` (root password for the first key install; prompted when key auth fails and it is empty), `--verbose`. Planned: `install --host --target` (full) and `secrets --host --target` (Phase 2–3 resume, as in Pipeline 4.2, by filtering `stages.All`); `--state-dir`.
+- **Host key**: `pipeline.HostPin` keeps one key per host in `<state dir>/<host>.known_hosts`, and `pipeline.SSH` and `InstallAuthorizedKeys` accept only that key. nixos-anywhere cannot be given the pin (ROADMAP "Plumbing design", Host key). Stage 3.2 runs `nixos-rebuild` on the target, so it needs no ssh options from here.
+- **Tool helpers**: `internal/nix` and `internal/git` exist. To add, each in its own package once a second stage needs it (§4): `sops`, `nixos-rebuild`. Do ssh→age conversion and `.sops.yaml` editing in-process.
+- **CLI** (`cmd/nixos-installer/flags.go`, `inputs.go`): `--target` (prompted when empty; IPv4, IPv6, or link-local IPv6 with zone such as `fe80::1%eth0`), `--host` (picked from the config's `bootstrapEntries` output when empty), `--config` (prompted when empty), `--disk` (picked on the target when empty), `--ssh-password` (the ISO's root password for the first key install; prompted when key auth fails, it is empty and the target offers password login), `--verbose`. Planned: `install --host --target` (full) and `secrets --host --target` (Phase 2–3 resume, as in Pipeline 4.2, by filtering `stages.All`).
 - **Secrets hygiene**: never put secrets in argv or logs (the bash script followed this — keep it), always `umask 077` on target, cleanup in a deferred step even on failure.

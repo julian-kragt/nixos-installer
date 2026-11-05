@@ -65,7 +65,7 @@ func TestAskTarget(t *testing.T) {
 func TestListAndPickHost(t *testing.T) {
 	dir := newConfig(t, "atlas", "broadway")
 	ctx, _ := operator("2\n")
-	hosts, err := listHosts(ctx, "b", dir)
+	hosts, err := listHosts(ctx, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestListAndPickHost(t *testing.T) {
 func TestListHostsWithoutHosts(t *testing.T) {
 	dir := newConfig(t)
 	ctx, _ := operator("")
-	if _, err := listHosts(ctx, "b", dir); err == nil || !strings.Contains(err.Error(), "no installable hosts") {
+	if _, err := listHosts(ctx, dir); err == nil || !strings.Contains(err.Error(), "no installable hosts") {
 		t.Errorf("err = %v", err)
 	}
 }

@@ -67,15 +67,14 @@ func install(ctx context.Context, in pipeline.Inputs, stateDir string) error {
 	if err != nil {
 		return err
 	}
-	env := &pipeline.Env{Inputs: in, State: st, Remote: pipeline.SSH(in.Target)}
-	return pipeline.Run(ctx, env, stages.All)
+	return pipeline.Run(ctx, pipeline.NewEnv(in, st), stages.All)
 }
 
 // defaultStateDir returns ${XDG_STATE_HOME:-~/.local/state}/nixos-installer.
 func defaultStateDir() string {
 	const app = "nixos-installer"
 	base := os.Getenv("XDG_STATE_HOME")
-	if base == "" {
+	if !filepath.IsAbs(base) { // unset, or relative, which the XDG spec says to ignore
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return filepath.Join(".", ".state", app)

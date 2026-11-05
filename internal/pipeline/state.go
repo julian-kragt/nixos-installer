@@ -15,6 +15,8 @@ type State struct {
 	Disk      string   // install disk the stages work on
 	Completed []string // IDs of the stages that are done
 
+	HostKeyFingerprint string // the installed system's SSH host key
+
 	path string
 }
 

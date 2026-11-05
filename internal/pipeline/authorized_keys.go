@@ -11,7 +11,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// ErrAuth is what BootstrapKey returns when the target rejects the password.
+// ErrAuth is what InstallAuthorizedKeys returns when the target rejects the password.
 var ErrAuth = errors.New("password authentication failed")
 
 // authError wraps err in ErrAuth when it is the ssh package's authentication
@@ -23,19 +23,30 @@ func authError(err error) error {
 	return err
 }
 
-// BootstrapKey connects to addr:22 as root with password, installs
+// InstallAuthorizedKeys connects to addr:22 as root with password, installs
 // authorizedKeys into /root/.ssh/authorized_keys, and disconnects.
-// It is used only once, before key auth is set up.
-// TODO: replace InsecureIgnoreHostKey with TOFU once host key pinning is implemented.
-func BootstrapKey(ctx context.Context, addr, password, authorizedKeys string) error {
+// It is used only once, before key auth is set up. The password is only sent
+// to the system holding the key in pin.
+func InstallAuthorizedKeys(ctx context.Context, addr, password, authorizedKeys string, pin HostPin) error {
+	return installAuthorizedKeys(ctx, net.JoinHostPort(addr, "22"), password, authorizedKeys, pin)
+}
+
+func installAuthorizedKeys(ctx context.Context, addr, password, authorizedKeys string, pin HostPin) error {
+	pinned, err := pin.Load()
+	if err != nil {
+		return err
+	}
+	if pinned == nil {
+		return errors.New("no host key pinned for " + pin.Host)
+	}
 	cfg := &ssh.ClientConfig{
 		User:            "root",
 		Auth:            []ssh.AuthMethod{ssh.Password(password)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
+		HostKeyCallback: ssh.FixedHostKey(pinned),
 		Timeout:         10 * time.Second,
 	}
 
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", net.JoinHostPort(addr, "22"))
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}

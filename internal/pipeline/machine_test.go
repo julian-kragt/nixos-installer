@@ -113,12 +113,15 @@ func TestRunStopsWhenCancelled(t *testing.T) {
 
 func TestSSHArgv(t *testing.T) {
 	for _, addr := range []string{"192.168.1.100", "2001:db8::5", "fe80::1%eth0"} {
-		argv := SSH(addr).ssh
+		argv := SSH(addr, HostPin{Host: "h", File: "/state/h.known_hosts"}).ssh
 		if argv[0] != "ssh" || !slices.Equal(argv[len(argv)-3:], []string{"-l", "root", addr}) {
 			t.Errorf("%s: argv = %q", addr, argv)
 		}
 		if !slices.Contains(argv, "BatchMode=yes") {
 			t.Errorf("%s: ssh may prompt and garble the live area: %q", addr, argv)
+		}
+		if !slices.Contains(argv, "StrictHostKeyChecking=yes") || !slices.Contains(argv, "HostKeyAlias=h") {
+			t.Errorf("%s: ssh must check the pin: %q", addr, argv)
 		}
 	}
 }

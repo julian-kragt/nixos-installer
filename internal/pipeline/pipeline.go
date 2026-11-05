@@ -6,6 +6,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"slices"
 
 	"installer/internal/runner"
@@ -14,12 +15,11 @@ import (
 // Inputs are the operator's choices for this run. They are complete before
 // the first stage runs.
 type Inputs struct {
-	Host        string // host to install: an entry of the config flake's `bootstrap` output
+	Host        string // host to install: an entry of the config flake's `bootstrapEntries` output
 	Target      string // IP address of the target machine
 	ConfigDir   string // absolute path to the config flake
-	Bootstrap   string // flake reference of nixos-bootstrap
 	Disk        string // disk to install to; empty = detect on the target
-	SSHPassword string // root SSH password for initial key bootstrap; prompts when empty
+	SSHPassword string // root SSH password of the NixOS ISO for initial key bootstrap; prompts when empty
 }
 
 // Env is everything a stage needs besides its context. Parallel steps must
@@ -30,6 +30,14 @@ type Env struct {
 	State  *State
 	Local  Machine // the provider: the machine the installer runs on
 	Remote Machine // the target
+	Pin    HostPin // the host key Remote accepts
+}
+
+// NewEnv returns the Env for a run: in must be complete and st loaded. The host
+// key pin lives next to the state file.
+func NewEnv(in Inputs, st *State) *Env {
+	pin := NewHostPin(filepath.Dir(st.Path()), st.Host)
+	return &Env{Inputs: in, State: st, Remote: SSH(in.Target, pin), Pin: pin}
 }
 
 // Stage is one step of the pipeline.

@@ -7,4 +7,5 @@ import "installer/internal/pipeline"
 var All = []pipeline.Stage{
 	{ID: "0.0", Name: "Environment preparation", Always: true, Run: environmentPreparation},
 	{ID: "0.1", Name: "Provider preparation", Run: providerPreparation},
+	{ID: "0.2", Name: "Base install", Run: baseInstall},
 }

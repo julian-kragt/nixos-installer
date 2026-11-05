@@ -32,7 +32,7 @@ func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*
 		if err != nil {
 			return err
 		}
-		hosts, err := listHosts(ctx, in.Bootstrap, configDir)
+		hosts, err := listHosts(ctx, configDir)
 		if err != nil {
 			return err
 		}
@@ -114,13 +114,13 @@ func expandHome(p string) string {
 
 // listHosts returns the hosts that are valid install targets: the config's
 // entries, as nixos-bootstrap reports them.
-func listHosts(ctx context.Context, bootstrap, configDir string) ([]string, error) {
-	hosts, err := nix.ListHosts(ctx, pipeline.Machine{}, nix.Flakes{Bootstrap: bootstrap, Config: configDir})
+func listHosts(ctx context.Context, configDir string) ([]string, error) {
+	hosts, err := nix.ListHosts(ctx, pipeline.Machine{}, configDir)
 	if err != nil {
 		return nil, fmt.Errorf("list hosts: %w", err)
 	}
 	if len(hosts) == 0 {
-		return nil, fmt.Errorf("no installable hosts: the `bootstrap` output of %s is empty", configDir)
+		return nil, fmt.Errorf("no installable hosts: the `bootstrapEntries` output of %s is empty", configDir)
 	}
 	return hosts, nil
 }

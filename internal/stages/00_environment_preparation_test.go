@@ -2,11 +2,30 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestOffersPassword(t *testing.T) {
+	cases := []struct {
+		name string
+		err  string
+		want bool
+	}{
+		{"installed system", "true: exit status 255: root@10.0.0.1: Permission denied (publickey).", false},
+		{"ISO", "true: exit status 255: root@10.0.0.1: Permission denied (publickey,password,keyboard-interactive).", true},
+		{"keyboard-interactive is not password", "true: exit status 255: root@10.0.0.1: Permission denied (publickey,keyboard-interactive).", false},
+		{"not an auth failure", "true: exit status 255: ssh: connect to host 10.0.0.1 port 22: password", false},
+	}
+	for _, c := range cases {
+		if got := offersPassword(errors.New(c.err)); got != c.want {
+			t.Errorf("%s: offersPassword = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
 
 func TestDialTCP(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
