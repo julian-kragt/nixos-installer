@@ -22,6 +22,7 @@ type level int
 const (
 	levelDebug level = iota
 	levelInfo
+	levelDetail
 	levelWarn
 	levelError
 )
@@ -211,6 +212,10 @@ func Debug(ctx context.Context, msg string) { logAt(ctx, levelDebug, msg) }
 // Info logs an informational message into ctx's task.
 func Info(ctx context.Context, msg string) { logAt(ctx, levelInfo, msg) }
 
+// Detail logs a row that continues the previous log line: no symbol, indented
+// below it. Spacing in msg is kept, so rows can line up as a table.
+func Detail(ctx context.Context, msg string) { logAt(ctx, levelDetail, msg) }
+
 // Warn logs a warning into ctx's task.
 func Warn(ctx context.Context, msg string) { logAt(ctx, levelWarn, msg) }
 
@@ -234,6 +239,8 @@ func (r *Runner) logLocked(n *node, lv level, msg string) {
 	switch lv {
 	case levelInfo:
 		sym = "→"
+	case levelDetail:
+		sym = "│"
 	case levelWarn:
 		sym = "⚠"
 	case levelError:

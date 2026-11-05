@@ -115,6 +115,10 @@ func (r *Runner) liveRender() []string {
 // collect appends the rows for n and everything below it.
 func (r *Runner) collect(n *node, depth int, now time.Time, live bool, out *[]line) {
 	if n.isLog {
+		if n.level == levelDetail {
+			*out = append(*out, line{depth: depth + 1, sym: " ", text: n.title})
+			return
+		}
 		sym, col := logStyle(n.level, depth == 0)
 		*out = append(*out, line{depth: depth, sym: sym, color: col, text: n.title})
 		return

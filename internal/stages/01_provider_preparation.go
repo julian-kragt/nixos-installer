@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -102,16 +103,70 @@ func confirmInstall(ctx context.Context, target machine.Machine, host string, de
 	if err != nil {
 		return err
 	}
-	disks, err := target.Run(ctx, "lsblk", "-d", "-o", "NAME,SIZE,MODEL,TYPE")
+	disks, err := target.Run(ctx, "lsblk", "-d", "-J", "-o", "PATH,NAME,SIZE,MODEL,TYPE")
+	if err != nil {
+		return err
+	}
+	// The config may name a device by a /dev/disk/by-id/ link; lsblk lists /dev/<name>.
+	var erased []string
+	for _, device := range devices {
+		path, err := target.Run(ctx, "readlink", "-f", device)
+		if err != nil {
+			return err
+		}
+		erased = append(erased, strings.TrimSpace(path))
+	}
+	rows, err := diskRows(disks, erased)
 	if err != nil {
 		return err
 	}
 	runner.Info(ctx, fmt.Sprintf("Target %s will install %s", strings.TrimSpace(name), host))
-	for _, line := range strings.Split(strings.TrimSpace(disks), "\n") {
-		runner.Info(ctx, line)
+	for _, row := range rows {
+		runner.Detail(ctx, row)
 	}
 	wiped := strings.Join(slices.Sorted(maps.Values(devices)), ", ")
 	return runner.RequireTyped(ctx, fmt.Sprintf("Everything on %s will be erased. Type 'install' to continue: ", wiped), "install",
 		errors.New("confirmation required: run the installer in a terminal"),
 		errors.New("aborted: nothing was changed on the target"))
+}
+
+// diskRows turns the JSON of lsblk into one aligned row per disk, marking the
+// disks whose path is in erased. Loop devices and the like are left out.
+func diskRows(lsblkJSON string, erased []string) ([]string, error) {
+	var out struct {
+		Blockdevices []struct {
+			Path  string `json:"path"`
+			Name  string `json:"name"`
+			Size  string `json:"size"`
+			Model string `json:"model"`
+			Type  string `json:"type"`
+		} `json:"blockdevices"`
+	}
+	if err := json.Unmarshal([]byte(lsblkJSON), &out); err != nil {
+		return nil, fmt.Errorf("parse lsblk output: %w", err)
+	}
+
+	nameWidth, sizeWidth := 0, 0
+	for _, d := range out.Blockdevices {
+		if d.Type == "disk" {
+			nameWidth = max(nameWidth, len(d.Name))
+			sizeWidth = max(sizeWidth, len(d.Size))
+		}
+	}
+
+	var rows []string
+	for _, d := range out.Blockdevices {
+		if d.Type != "disk" {
+			continue
+		}
+		row := fmt.Sprintf("%-*s %*s", nameWidth, d.Name, sizeWidth, d.Size)
+		if model := strings.TrimSpace(d.Model); model != "" {
+			row += "  " + model
+		}
+		if slices.Contains(erased, d.Path) {
+			row += "  (will be erased)"
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }

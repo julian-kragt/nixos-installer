@@ -346,6 +346,40 @@ func TestNonTTY(t *testing.T) {
 	eq(t, squash(strings.Split(strings.TrimSpace(out), "\n")), []string{"✓ A 0ms", "  → inside", "✓ B 0ms"})
 }
 
+func TestDetailRowsContinueTheLogLine(t *testing.T) {
+	want := []string{
+		"✓ Task 0ms",
+		"  → Summary",
+		"      sda   1G",
+		"      nvme 10G",
+	}
+	logAll := func(ctx context.Context) {
+		ctx, task := Start(ctx, "Task")
+		Info(ctx, "Summary")
+		Detail(ctx, "sda   1G")
+		Detail(ctx, "nvme 10G")
+		task.End(nil)
+	}
+
+	// Not squashed: the spacing inside a row is what lines the rows up.
+	h := newTTY(t, 80, 24, false)
+	logAll(h.ctx)
+	h.r.draw()
+	got := h.screen()
+	got[0] = squash(got[:1])[0]
+	eq(t, got, want)
+
+	var out, file bytes.Buffer
+	r := newRunner(Options{Out: &out, File: &file}, false, nil)
+	logAll(NewContext(context.Background(), r))
+	got = strings.Split(strings.TrimSpace(out.String()), "\n")
+	got[0] = squash(got[:1])[0]
+	eq(t, got, want)
+	if !strings.Contains(file.String(), "│ Task | sda   1G\n") {
+		t.Fatalf("log file: %q", file.String())
+	}
+}
+
 func TestCloseEndsRunningTasks(t *testing.T) {
 	h := newTTY(t, 80, 24, false)
 	Start(h.ctx, "left running")
