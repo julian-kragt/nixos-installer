@@ -116,6 +116,19 @@ func TestCheckBootstrapSystem(t *testing.T) {
 	}
 }
 
+func TestFeaturesWithoutNixCommand(t *testing.T) {
+	dir := t.TempDir()
+	script := "#!/bin/sh\necho \"error: experimental Nix feature 'nix-command' is disabled; add '--extra-experimental-features nix-command' to enable it\" >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(dir, "nix"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	got, err := Features(context.Background(), machine.Loopback())
+	if err != nil || len(got) != 0 {
+		t.Errorf("features = %q, %v; want none and no error", got, err)
+	}
+}
+
 func TestFeatures(t *testing.T) {
 	tests := []struct {
 		name, out string

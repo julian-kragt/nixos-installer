@@ -37,9 +37,18 @@ func (c Config) eval(ctx context.Context, attr string, out any, extra ...string)
 	return evalJSON(ctx, c.Machine, c.Dir+"#"+attr, out, args...)
 }
 
-// Features returns the experimental features nix has enabled on m.
+// nixCommandDisabled is what nix says when `nix config show` needs the
+// nix-command feature it does not have.
+const nixCommandDisabled = "experimental Nix feature 'nix-command' is disabled"
+
+// Features returns the experimental features nix has enabled on m. Without
+// nix-command, which `nix config show` itself needs, that is none: nix's
+// message is only seen when m is not quiet.
 func Features(ctx context.Context, m machine.Machine) ([]string, error) {
 	out, err := m.Run(ctx, "nix", "config", "show", "experimental-features")
+	if err != nil && strings.Contains(err.Error(), nixCommandDisabled) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

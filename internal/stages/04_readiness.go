@@ -19,7 +19,7 @@ const bootstrapModule = "nixos-bootstrap's bootstrap.nix"
 func readiness(ctx context.Context, env *pipeline.Env) error {
 	return runner.Parallel(ctx,
 		runner.Step{Title: "Check tools", Fn: func(ctx context.Context) error {
-			return checkTools(ctx, env.Remote, "git", "sops", "age-keygen", "nix", "curl")
+			return checkTools(ctx, env.Remote, "git", "sops", "nix", "curl")
 		}},
 		runner.Step{Title: "Check nix features", Fn: func(ctx context.Context) error {
 			return checkNixFeatures(ctx, env.Remote, "nix-command", "flakes", "pipe-operators")

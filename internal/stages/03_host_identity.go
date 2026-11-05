@@ -10,9 +10,12 @@ import (
 )
 
 // hostIdentity gives the target its own age key and records the recipient, for
-// the secrets stages.
+// the secrets stages. It checks for age-keygen itself, as 1.2 runs after it.
 func hostIdentity(ctx context.Context, env *pipeline.Env) error {
 	return runner.Run(ctx, "Ensure host age key", func(ctx context.Context) error {
+		if err := checkTools(ctx, env.Remote, "age-keygen"); err != nil {
+			return err
+		}
 		recipient, err := hostidentity.Recipient(ctx, env.Remote, hostidentity.KeyFile)
 		if err != nil {
 			return err
