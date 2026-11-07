@@ -5,6 +5,7 @@ package machine
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -26,10 +27,12 @@ func Local() Machine { return Machine{} }
 
 // SSH returns the root account on the machine at addr, authenticating via
 // ssh-agent and ~/.ssh keys. Only the key in pin is accepted for it. BatchMode=yes
-// prevents interactive prompts.
+// prevents interactive prompts. The agent is not forwarded, whatever
+// ~/.ssh/config says: ssh takes the first value it is given.
 func SSH(addr string, pin HostPin) Machine {
 	return Machine{ssh: []string{
 		"ssh",
+		"-o", forwardAgentOff,
 		"-o", "ConnectTimeout=10",
 		"-o", "StrictHostKeyChecking=yes",
 		"-o", "HostKeyAlias=" + pin.Host,
@@ -45,6 +48,29 @@ func SSH(addr string, pin HostPin) Machine {
 // takes the same route as over ssh: quoted here, parsed by a shell there. For
 // tests of code that runs on the target.
 func Loopback() Machine { return Machine{ssh: []string{"sh", "-c"}} }
+
+const (
+	forwardAgentOff = "ForwardAgent=no"
+	forwardAgentOn  = "ForwardAgent=yes"
+)
+
+// WithAgent returns m with the provider's ssh-agent forwarded to the command,
+// for the commands on the target that need GitHub, and only for those. It
+// changes nothing on a machine that is not reached over ssh.
+func (m Machine) WithAgent() Machine {
+	if i := slices.Index(m.ssh, forwardAgentOff); i >= 0 {
+		m.ssh = slices.Clone(m.ssh)
+		m.ssh[i] = forwardAgentOn
+	}
+	return m
+}
+
+// LostConnection reports whether err is ssh's own failure, exit code 255: the
+// connection could not be made or broke off, so the command may still run there.
+func LostConnection(err error) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && exit.ExitCode() == 255
+}
 
 // Quiet returns m with its output kept away from the runner, the log file and
 // error messages. Use it for every command that can print a secret.

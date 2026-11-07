@@ -126,6 +126,28 @@ func TestSSHArgv(t *testing.T) {
 	}
 }
 
+func TestAgentIsForwardedOnlyWithAgent(t *testing.T) {
+	plain := SSH("192.168.1.100", HostPin{Host: "h", File: "/state/h.known_hosts"})
+	forwarded := plain.WithAgent()
+	if !slices.Contains(plain.ssh, "ForwardAgent=no") || slices.Contains(plain.ssh, "ForwardAgent=yes") {
+		t.Errorf("plain argv = %q, want the agent off", plain.ssh)
+	}
+	if !slices.Contains(forwarded.ssh, "ForwardAgent=yes") || slices.Contains(forwarded.ssh, "ForwardAgent=no") {
+		t.Errorf("WithAgent argv = %q, want the agent on", forwarded.ssh)
+	}
+	if out, err := loopback.WithAgent().Run(context.Background(), "echo", "hi"); err != nil || out != "hi\n" {
+		t.Errorf("loopback with agent: got %q, %v", out, err)
+	}
+}
+
+func TestLostConnection(t *testing.T) {
+	_, lost := Machine{}.Run(context.Background(), "sh", "-c", "exit 255")
+	_, failed := Machine{}.Run(context.Background(), "sh", "-c", "exit 1")
+	if !LostConnection(lost) || LostConnection(failed) || LostConnection(nil) {
+		t.Errorf("LostConnection: 255 = %v, 1 = %v, nil = %v", LostConnection(lost), LostConnection(failed), LostConnection(nil))
+	}
+}
+
 func TestHasCommand(t *testing.T) {
 	m := Loopback()
 	if !m.HasCommand(context.Background(), "sh") {

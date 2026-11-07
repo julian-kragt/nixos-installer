@@ -270,3 +270,69 @@ func TestPushRejectedNamesTheRepo(t *testing.T) {
 		t.Errorf("err = %v, want it to name %s", err, dir)
 	}
 }
+
+func TestCheckPush(t *testing.T) {
+	dir := newRepo(t)
+	pushed(t, dir)
+	r := Repo{machine.Local(), dir}
+	if err := r.CheckPush(ctx); err != nil {
+		t.Errorf("err = %v", err)
+	}
+	sh(t, dir, "remote", "set-url", "--push", "origin", filepath.Join(t.TempDir(), "missing"))
+	if err := r.CheckPush(ctx); err == nil || !strings.Contains(err.Error(), dir) {
+		t.Errorf("err = %v, want a failure naming %s", err, dir)
+	}
+}
+
+func TestResetTo(t *testing.T) {
+	dir := newRepo(t)
+	r := Repo{machine.Local(), dir}
+	base, err := r.Head(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, "b", "2")
+	if _, err := r.Commit(ctx, "msg", "b"); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, "b", "3")
+	write(t, dir, "sub/a", "2")
+
+	if err := r.ResetTo(ctx, base, "b"); err != nil {
+		t.Fatal(err)
+	}
+	if head, _ := r.Head(ctx); head != base {
+		t.Errorf("HEAD = %s, want %s", head, base)
+	}
+	if got, _ := r.Dirty(ctx); !slices.Equal(got, []string{"sub/a"}) {
+		t.Errorf("dirty = %q, want only sub/a, which was not reset", got)
+	}
+}
+
+func TestSSHURL(t *testing.T) {
+	for in, want := range map[string]string{
+		"git@github.com:owner/repo.git":       "ssh://git@github.com/owner/repo.git",
+		"ssh://git@github.com/owner/repo.git": "ssh://git@github.com/owner/repo.git",
+		"https://github.com/owner/repo.git":   "",
+		"/srv/git/repo.git":                   "",
+		"file:///srv/git/repo.git":            "",
+		"github.com:owner/repo.git":           "",
+	} {
+		got, err := SSHURL(in)
+		if want == "" && err == nil {
+			t.Errorf("%s: got %q, want an error", in, got)
+		}
+		if want != "" && (err != nil || got != want) {
+			t.Errorf("%s: got %q, %v, want %q", in, got, err, want)
+		}
+	}
+}
+
+func TestOriginURL(t *testing.T) {
+	dir := newRepo(t)
+	sh(t, dir, "remote", "add", "origin", "git@github.com:owner/repo.git")
+	got, err := Repo{machine.Local(), dir}.OriginURL(ctx)
+	if err != nil || got != "ssh://git@github.com/owner/repo.git" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+}

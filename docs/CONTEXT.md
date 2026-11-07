@@ -74,10 +74,9 @@ The bootstrap system also sets systemd-boot and root SSH keys, includes git / so
 
 ### How the full config consumes secrets
 This wiring is in place, but the secrets behind it are not in use yet (§3).
-- Host (`hosts/common/core/sops.nix`): `defaultSopsFile = ${nix-secrets}/hosts/<host>.yaml`; identity = `/var/lib/sops-nix/key.txt`, created by Stage 1.2, + host SSH key (`age.sshKeyPaths`, to be dropped: ROADMAP B3); `validateSopsFiles = false`.
+- Host (`hosts/common/core/sops.nix`): `defaultSopsFile = ${nix-secrets}/hosts/<host>.yaml`; identity = `/var/lib/sops-nix/key.txt`, created by Stage 1.2, no SSH key (`age.sshKeyPaths = [ ]`) and no generated key (`age.generateKey = false`); `validateSopsFiles = false`.
 - User passwords (`hosts/common/accounts/secrets.nix`): `sops.secrets."passwords/<u>"` from `host-users/<host>-<u>.yaml` key `hashedPassword`, `neededForUsers = true`. `users.mutableUsers = false`, so a missing or undecryptable password = no console login.
 - Home Manager (`home/common/core/sops.nix`): `defaultSopsFile = host-users/<host>-<u>.yaml`, identity `~/.config/sops/age/keys.txt`.
-- Activation script `sopsUserAgeKeys` moves `/var/lib/sops-nix/pending-user-age-keys/<u>` into `~/.config/sops/age/keys.txt`. Only `install-host.sh` filled that directory, so the script has nothing left to do; removing it is part of B3 (ROADMAP).
 - Flake input: `nix-secrets = git+ssh://git@github.com/JulianKragt/nix-secrets.git?ref=main&shallow=1`, `flake = false`.
 
 ---
@@ -130,6 +129,8 @@ internal/commands/       the commands the stages run, one package each
                          git/           Repo: prefix, upstream, dirty and deleted paths, commit, RequireCommitted
                          luks/          the LUKS passphrase on the target
                          nixosanywhere/ run nixos-anywhere, tell what a target runs
+                         nixosrebuild/  nixos-rebuild switch on the target, waiting out a dropped connection
+                         systemd/       failed units on a machine
                          hostidentity/  the age keys of the host and of its users, created on the target
                          sops/          encrypt on the provider; check on the target that a file decrypts
                          mkpasswd/      the crypt hash of a login password
@@ -138,10 +139,10 @@ internal/secrets/        the nix-secrets repo: file layout, .sops.yaml editor, t
 internal/stages/         one file per stage, which orchestrates; nothing else
                          stages.go    All: the ordered stage list
                          <id>_<name>.go, named by stage ID: 0_0_environment_preparation.go
-                         0_1_provider_preparation.go … 2_4_commit_push.go
+                         0_1_provider_preparation.go … 3_2_rebuild.go
 ```
 
-How a run goes: `main` parses the flags into `pipeline.Inputs`, `resolveInputs` asks for the missing target and host and loads `<state dir>/<host>.json`, then `pipeline.Run(ctx, env, stages.All)` runs the stages in list order. A stage whose ID is in `State.Completed` is skipped; every other stage is recorded and the state saved when it succeeds. A completed stage with an `Outdated` check runs again when the check gives a reason: it and every stage after it are first removed from `Completed` and the state saved, so a run that stops on the way still runs them next time. 1.2 is outdated without a recorded host recipient, 1.3 when the config's users are not the ones whose recipients are recorded, so a user added to or removed from the host runs the secrets phase again. A stage with `Always: true` (0.0) runs every time and is never recorded.
+How a run goes: `main` parses the flags into `pipeline.Inputs`, `resolveInputs` asks for the missing target and host and loads `<state dir>/<host>.json`, then `pipeline.Run(ctx, env, stages.All)` runs the stages in list order. A stage whose ID is in `State.Completed` is skipped; every other stage is recorded and the state saved when it succeeds. A completed stage with an `Outdated` check runs again when the check gives a reason: it and every stage after it are first removed from `Completed` and the state saved, so a run that stops on the way still runs them next time. 1.2 is outdated without a recorded host recipient, 1.3 when the config's users are not the ones whose recipients are recorded, so a user added to or removed from the host runs the secrets phase again. 3.1 is outdated when the config no longer locks the recorded `SecretsCommit`. A stage with `Always: true` (0.0) runs every time and is never recorded.
 
 Three kinds of data, kept apart:
 
@@ -183,7 +184,7 @@ Legacy = `install-host.sh` at `06dd040` in nixos-config.
 | 2.3 Template authoring | provider (+target checks) | `cp templates/host.yaml` + `sops --encrypt --in-place` | The operator writes the file in vim (no swap, backup, undo or viminfo; temp file removed on exit) and types its passwords; `sops` on the provider encrypts it to the target's public keys; the target checks that each value decrypts, per path with `--extract`. No `updatekeys`: the provider cannot decrypt. |
 | 2.4 Commit/push | provider | `sops updatekeys -y hosts/<h>.yaml host-users/<h>-<u>.yaml`, `git add -A; commit; push` | Commit only the listed paths (not `-A`). Verify `sops:` metadata in every secret file. Persist SHA. |
 | 3.1 Flake input | provider | `nix flake update nix-secrets` + commit `flake.lock` (in config, on provider) | See §6.4. |
-| 3.2 Rebuild | target | `nixos-rebuild --flake .#<h> --target-host root@ip --build-host root@ip switch` (from provider) | Pipeline wants it on target. Validation list from legacy Phase 9 is reusable. |
+| 3.2 Rebuild | target | `nixos-rebuild --flake .#<h> --target-host root@ip --build-host root@ip switch` (from provider) | Replaced: `nixos-rebuild switch --flake git+ssh://…?rev=<ConfigRev>#<h>` on the target with agent forwarding (`internal/commands/nixosrebuild`); legacy Phase 9's validation without the user-age-key checks. |
 | 3.3 Cleanup | target | `trap rm KNOWN_HOSTS` only | New: wipe temp creds, optional upstream revoke. |
 | 4.1 Policy | provider/target | — | New: no plaintext, rule coverage for every `hosts/*`/`host-users/*`. |
 | 4.2 Recovery | — | `--enroll-sops`, `--deploy-remote` modes | Becomes "resume from persisted state". |
@@ -204,16 +205,16 @@ The numbers are the ones the roadmap and the stage prompts refer to. The roadmap
 - **6.6 Reinstall**: on an anchor mismatch, show old and new, take a typed confirmation, replace the anchors; 2.3 then asks again for the values of the files whose recipients changed.
 - **6.7 Shared file**: moot, `shared.yaml` no longer exists. Whether `sops` on the target can decrypt with the host SSH key is still to verify ([00-prep.md](prompts/00-prep.md)).
 - **6.8 Bootstrap additions**: done by nixos-bootstrap (§2).
-- **6.9 Housekeeping, still open**: `hosts/nixos/atlas/default.nix` sets `users.users.root.initialPassword = "test"` (B3 in the roadmap); `broadway/disko.nix` device is still `REPLACE_ME_BEFORE_INSTALL`.
+- **6.9 Housekeeping, still open**: `broadway/disko.nix` device is still `REPLACE_ME_BEFORE_INSTALL`.
 
 ---
 
 ## 7. Direction for the Go code
 
-- **State**: `pipeline.State`, JSON per host in `~/.local/state/nixos-installer/<host>.json`, saved after every stage. Has `Host`, `Completed`, `HostRecipient`. To add as stages need them (no user list: stages read `installerData.<host>` themselves, see ROADMAP "Plumbing design"): `UserRecipients map[string]string`, `SecretsCommit`, `ConfigRev`. The secrets repo is an input (`--secrets`), not state. No phase marker: `Completed` says whether 1.1 and 3.3 are done (ROADMAP "Plumbing design", Phase).
+- **State**: `pipeline.State`, JSON per host in `~/.local/state/nixos-installer/<host>.json`, saved after every stage. Has `Host`, `Completed`, `HostRecipient`, `UserRecipients`, `SecretsCommit` and `ConfigRev` (the pushed config commit 3.2 builds). No user list: stages read `installerData.<host>` themselves, see ROADMAP "Plumbing design". The secrets repo is an input (`--secrets`), not state. No phase marker: `Completed` says whether 1.1 and 3.3 are done (ROADMAP "Plumbing design", Phase).
 - **Stage IDs**: strings matching the Pipeline (`"0.1"`, `"2.3"`…); the order is the order of `stages.All`; resume = skip what is in `State.Completed`, unless the stage's `Outdated` check says it must run again.
-- **Machines**: `machine.Machine` runs a command locally or through the system `ssh`, with stderr streamed to the runner, stdin for secrets (`RunStdin`) and `Quiet()` for commands that print secrets. Still to add with the stage that needs it: agent forwarding (`WithAgent()`, 3.2). No interactive mode over ssh; vim runs on the provider through `runner.Hand`.
-- **Host key**: `machine.HostPin` keeps one key per host in `<state dir>/<host>.known_hosts`, and `machine.SSH` and `InstallAuthorizedKeys` accept only that key. nixos-anywhere cannot be given the pin (ROADMAP "Plumbing design", Host key). Stage 3.2 runs `nixos-rebuild` on the target, so it needs no ssh options from here.
-- **Tool helpers**: `internal/commands/nix`, `internal/commands/git`, `internal/commands/luks`, `internal/commands/nixosanywhere` and `internal/commands/hostidentity` exist. To add, each in its own package (§4): `sops` (encrypt on the provider, check on the target), `nixos-rebuild`. Do `.sops.yaml` editing in-process.
+- **Machines**: `machine.Machine` runs a command locally or through the system `ssh`, with stderr streamed to the runner, stdin for secrets (`RunStdin`) and `Quiet()` for commands that print secrets. `SSH` turns agent forwarding off; `WithAgent()` turns it on for one command, used only by 3.2 for the commands that need GitHub. `LostConnection(err)` tells ssh's own failure (exit 255) from the command's. No interactive mode over ssh; vim runs on the provider through `runner.Hand`.
+- **Host key**: `machine.HostPin` keeps one key per host in `<state dir>/<host>.known_hosts`, and `machine.SSH` and `InstallAuthorizedKeys` accept only that key. nixos-anywhere cannot be given the pin (ROADMAP "Plumbing design", Host key). Stage 3.2 runs `nixos-rebuild` on the target, so it needs no ssh options from here, and checks the pin again after the switch.
+- **Tool helpers**: `internal/commands/nix`, `internal/commands/git`, `internal/commands/luks`, `internal/commands/nixosanywhere`, `internal/commands/hostidentity`, `internal/commands/sops`, `internal/commands/nixosrebuild` and `internal/commands/systemd` exist, each in its own package (§4). `.sops.yaml` editing is in-process.
 - **CLI** (`cmd/nixos-installer/flags.go`, `inputs.go`): `--target` (prompted when empty; IPv4, IPv6, or link-local IPv6 with zone such as `fe80::1%eth0`), `--host` (picked from the config's `bootstrapEntries` output when empty), `--config` (prompted when empty), `--secrets` (the nix-secrets clone; prompted when empty, must hold a `.sops.yaml`), `--ssh-password` (the ISO's root password for the first key install; prompted when key auth fails, it is empty and the target offers password login), `--reinstall` (deletes the chosen host's `<host>.json` and `<host>.known_hosts` before the state is loaded, so all stages run again; the target must be booted from the ISO to be installed again), `--generate-hardware` (generates a missing hardware config from the target in 0.1 without asking), `--verbose`. Planned: `install --host --target` (full) and `secrets --host --target` (Phase 2–3 resume, as in Pipeline 4.2, by filtering `stages.All`).
 - **Secrets hygiene**: never put secrets in argv or logs (the bash script followed this — keep it), always `umask 077` on target, cleanup in a deferred step even on failure.

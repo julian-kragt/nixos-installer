@@ -23,6 +23,9 @@ type State struct {
 	UserRecipients map[string]string `json:",omitempty"`
 	// SecretsCommit is the nix-secrets commit with the host's secrets.
 	SecretsCommit string `json:",omitempty"`
+	// ConfigRev is the pushed nixos-config commit whose lock file locks
+	// SecretsCommit, the revision 3.2 builds.
+	ConfigRev string `json:",omitempty"`
 
 	path string
 }

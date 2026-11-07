@@ -33,7 +33,7 @@ func fakeNix(t *testing.T, body string) func() []string {
 
 const config = "/home/me/config"
 
-var cfg = Config{machine.Local(), config}
+var cfg = Config{Machine: machine.Local(), Dir: config}
 
 // evalArgs is the command line every eval of config runs, before extra.
 func evalArgs(attr string, extra ...string) []string {
@@ -152,5 +152,119 @@ func TestFeatures(t *testing.T) {
 				t.Errorf("args = %q, want %q", args(), want)
 			}
 		})
+	}
+}
+
+func TestUpdateInput(t *testing.T) {
+	args := fakeNix(t, ``)
+	if err := cfg.UpdateInput(context.Background(), "nix-secrets"); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"flake", "update", "nix-secrets", "--flake", config}; !slices.Equal(args(), want) {
+		t.Errorf("args = %q, want %q", args(), want)
+	}
+}
+
+func TestLockedRev(t *testing.T) {
+	const nodes = `"root":"root","nodes":{"root":{"inputs":{"nix-secrets":"nix-secrets_2","nixpkgs":["other","nixpkgs"]}},` +
+		`"nix-secrets_2":{"locked":{"rev":"abc"}},"other":{"locked":{}}`
+	for _, tc := range []struct {
+		name, lock, input, want, err string
+	}{
+		{"input", `{` + nodes + `}}`, "nix-secrets", "abc", ""},
+		{"missing input", `{` + nodes + `}}`, "absent", "", "no input absent"},
+		{"follows", `{` + nodes + `}}`, "nixpkgs", "", "follows"},
+		{"no rev", `{"root":"root","nodes":{"root":{"inputs":{"x":"other"}},"other":{"locked":{}}}}`, "x", "", "no git rev"},
+		{"garbage", `not json`, "x", "", "flake.lock"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := lockedRev([]byte(tc.lock), tc.input)
+			if tc.err == "" && (err != nil || got != tc.want) {
+				t.Errorf("got %q, %v; want %q", got, err, tc.want)
+			}
+			if tc.err != "" && (err == nil || !strings.Contains(err.Error(), tc.err)) {
+				t.Errorf("err = %v, want it to contain %q", err, tc.err)
+			}
+		})
+	}
+}
+
+func TestLockedRevReadsTheLockFile(t *testing.T) {
+	dir := t.TempDir()
+	lock := `{"root":"root","nodes":{"root":{"inputs":{"s":"s"}},"s":{"locked":{"rev":"abc"}}}}`
+	if err := os.WriteFile(filepath.Join(dir, "flake.lock"), []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := (Config{Machine: machine.Local(), Dir: dir}).LockedRev("s"); err != nil || got != "abc" {
+		t.Errorf("got %q, %v", got, err)
+	}
+}
+
+func TestEvalAtRev(t *testing.T) {
+	args := fakeNix(t, `[]`)
+	if _, err := cfg.At("abc").Hosts(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := args()[2]; got != "git+file://"+config+"?rev=abc#installerData" {
+		t.Errorf("installable = %q, want the repository at abc", got)
+	}
+	if cfg.ref() != config {
+		t.Errorf("ref = %q, want the working tree", cfg.ref())
+	}
+}
+
+func TestPasswordUsers(t *testing.T) {
+	args := fakeNix(t, `["passwords/zoe","passwords/jkragt","wifi","passwords/","passwords/a/b"]`)
+	got, err := cfg.PasswordUsers(context.Background(), "atlas")
+	if err != nil || !slices.Equal(got, []string{"jkragt", "zoe"}) {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if want := evalArgs("nixosConfigurations.atlas.config.sops.secrets", "--apply", "builtins.attrNames"); !slices.Equal(args(), want) {
+		t.Errorf("args = %q, want %q", args(), want)
+	}
+}
+
+func TestToplevel(t *testing.T) {
+	args := fakeNix(t, `"/nix/store/abc-nixos-system-atlas"`)
+	got, err := cfg.Toplevel(context.Background(), "atlas")
+	if err != nil || got != "/nix/store/abc-nixos-system-atlas" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if want := evalArgs("nixosConfigurations.atlas.config.system.build.toplevel.outPath"); !slices.Equal(args(), want) {
+		t.Errorf("args = %q, want %q", args(), want)
+	}
+}
+
+func TestInputURL(t *testing.T) {
+	const nodes = `"root":"root","nodes":{"root":{"inputs":{"s":"s","gh":"gh","nixpkgs":["other","nixpkgs"]}},` +
+		`"s":{"original":{"type":"git","url":"ssh://git@github.com/o/s.git"}},"gh":{"original":{"type":"github","owner":"o","repo":"r"}}`
+	for _, tc := range []struct {
+		name, input, want, err string
+	}{
+		{"git", "s", "ssh://git@github.com/o/s.git", ""},
+		{"github", "gh", "", "not a git URL"},
+		{"follows", "nixpkgs", "", "follows"},
+		{"missing", "absent", "", "no input absent"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := inputURL([]byte(`{`+nodes+`}}`), tc.input)
+			if tc.err == "" && (err != nil || got != tc.want) {
+				t.Errorf("got %q, %v; want %q", got, err, tc.want)
+			}
+			if tc.err != "" && (err == nil || !strings.Contains(err.Error(), tc.err)) {
+				t.Errorf("err = %v, want it to contain %q", err, tc.err)
+			}
+		})
+	}
+}
+
+func TestInputURLReadsTheMetadata(t *testing.T) {
+	args := fakeNix(t, `{"locks":{"root":"root","nodes":{"root":{"inputs":{"s":"s"}},"s":{"original":{"type":"git","url":"ssh://h/s.git"}}}}}`)
+	got, err := cfg.At("abc").InputURL(context.Background(), "s")
+	if err != nil || got != "ssh://h/s.git" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if want := []string{"flake", "metadata", "--json", "--no-write-lock-file", "git+file://" + config + "?rev=abc"}; !slices.Equal(args(), want) {
+		t.Errorf("args = %q, want %q", args(), want)
 	}
 }

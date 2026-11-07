@@ -183,12 +183,55 @@ func (r Repo) Head(ctx context.Context) (string, error) {
 	return strings.TrimSpace(out), err
 }
 
+// OriginURL returns the URL of the remote origin as an ssh:// URL, the form a
+// git+ssh flake URL takes.
+func (r Repo) OriginURL(ctx context.Context) (string, error) {
+	out, err := r.run(ctx, "remote", "get-url", "origin")
+	if err != nil {
+		return "", err
+	}
+	return SSHURL(strings.TrimSpace(out))
+}
+
+// SSHURL returns remote as an ssh:// URL: an scp-like git@host:path becomes
+// ssh://git@host/path, an ssh:// URL stays. Any other URL is an error, because
+// the target fetches over ssh with the provider's agent.
+func SSHURL(remote string) (string, error) {
+	if strings.HasPrefix(remote, "ssh://") {
+		return remote, nil
+	}
+	host, path, ok := strings.Cut(remote, ":")
+	if ok && !strings.Contains(remote, "://") && strings.Contains(host, "@") && !strings.Contains(host, "/") && path != "" {
+		return "ssh://" + host + "/" + strings.TrimPrefix(path, "/"), nil
+	}
+	return "", fmt.Errorf("%s is not an ssh URL; the target fetches over ssh with the provider's agent, so set origin to one (git@github.com:owner/repo.git)", remote)
+}
+
 // Push pushes the current branch to its upstream.
 func (r Repo) Push(ctx context.Context) error {
 	if _, err := r.run(ctx, "push"); err != nil {
 		return fmt.Errorf("push %s: %w", r.Dir, err)
 	}
 	return nil
+}
+
+// CheckPush fails unless the current branch could be pushed to its upstream
+// now, which also checks write access to it. Nothing is pushed.
+func (r Repo) CheckPush(ctx context.Context) error {
+	if _, err := r.run(ctx, "push", "--dry-run"); err != nil {
+		return fmt.Errorf("cannot push %s: %w", r.Dir, err)
+	}
+	return nil
+}
+
+// ResetTo moves the current branch back to rev and puts paths (relative to
+// Dir) back as they are at rev. Other files are not touched.
+func (r Repo) ResetTo(ctx context.Context, rev string, paths ...string) error {
+	if _, err := r.run(ctx, "reset", "-q", "--soft", rev); err != nil {
+		return err
+	}
+	_, err := r.run(ctx, append([]string{"checkout", rev, "--"}, paths...)...)
+	return err
 }
 
 // Commit commits exactly paths (relative to Dir) with message, and only when
