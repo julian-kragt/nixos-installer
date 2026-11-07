@@ -63,3 +63,23 @@ func TestEnsure(t *testing.T) {
 		t.Errorf("present: %v", err)
 	}
 }
+
+func TestRemove(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "disko-password")
+	old := passwordPath
+	passwordPath = path
+	defer func() { passwordPath = old }()
+
+	if err := os.WriteFile(path, []byte("s3cret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := Remove(context.Background(), machine.Loopback()); err != nil || !removed {
+		t.Fatalf("present: removed = %v, %v", removed, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("file still there: %v", err)
+	}
+	if removed, err := Remove(context.Background(), machine.Loopback()); err != nil || removed {
+		t.Errorf("gone: removed = %v, %v", removed, err)
+	}
+}

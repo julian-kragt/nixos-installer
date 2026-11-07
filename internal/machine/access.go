@@ -131,6 +131,34 @@ func (m Machine) AgentKeys(ctx context.Context) (string, error) {
 	return out, nil
 }
 
+// agentSockets are the globs where sshd puts the agents forwarded to root:
+// under ~/.ssh/agent since OpenSSH 10.1, in /tmp/ssh-* before. A variable for
+// tests.
+var agentSockets = []string{"/root/.ssh/agent/*", "/tmp/ssh-*/agent.*"}
+
+// forwardedAgents prints each socket among the globs in $@ where an agent
+// answers, with or without keys, and removes those nobody listens on any more,
+// left over from a session that ended. A socket whose agent does not answer in
+// time belongs to an sshd whose connection is gone; that sshd removes it.
+const forwardedAgents = `for s in $@; do
+	[ -S "$s" ] || continue
+	SSH_AUTH_SOCK=$s timeout 5 ssh-add -l >/dev/null 2>&1
+	case $? in
+	0|1) echo "$s" ;;
+	2) rm -f "$s" ;;
+	esac
+done`
+
+// ForwardedAgents returns the sockets on m through which a forwarded ssh-agent
+// still answers. Sockets nobody listens on any more are removed.
+func (m Machine) ForwardedAgents(ctx context.Context) ([]string, error) {
+	out, err := m.Run(ctx, "sh", append([]string{"-c", forwardedAgents, "sh"}, agentSockets...)...)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(out), nil
+}
+
 // providerKeys returns the SSH public keys the provider should use, preferring
 // keys loaded in the SSH agent, with a fallback to standard key files under
 // ~/.ssh.

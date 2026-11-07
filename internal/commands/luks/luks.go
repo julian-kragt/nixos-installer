@@ -40,6 +40,17 @@ func Ensure(ctx context.Context, target machine.Machine) error {
 	return err
 }
 
+// Remove deletes passwordPath on target and reports whether it was there.
+// After the install it must not be: the passphrase unlocks the disk it would
+// be on. rm, not shred: the target's /tmp is on a copy-on-write filesystem.
+func Remove(ctx context.Context, target machine.Machine) (bool, error) {
+	out, err := target.Run(ctx, "sh", "-c", `if [ -e "$1" ]; then rm -f "$1" && echo removed; fi`, "sh", passwordPath)
+	if err != nil {
+		return false, fmt.Errorf("remove %s: %w", passwordPath, err)
+	}
+	return strings.TrimSpace(out) == "removed", nil
+}
+
 // askPassphrase asks until two non-empty answers agree.
 func askPassphrase(ctx context.Context) (string, error) {
 	for {

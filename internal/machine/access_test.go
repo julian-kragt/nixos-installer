@@ -161,3 +161,47 @@ func TestAgentKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestForwardedAgents(t *testing.T) {
+	// Short: macOS allows 104 bytes for a socket path, and t.TempDir is long.
+	dir, err := os.MkdirTemp("/tmp", "fa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	for _, name := range []string{"agent.live", "agent.stale"} {
+		l, err := net.Listen("unix", filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { l.Close() })
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agent.file"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := t.TempDir()
+	for name, script := range map[string]string{
+		"ssh-add": `[ "$1" = -l ] || exit 9; case $SSH_AUTH_SOCK in */agent.live) exit 0 ;; esac; exit 2`,
+		"timeout": `shift; exec "$@"`,
+	} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	old := agentSockets
+	agentSockets = []string{filepath.Join(dir, "agent.*"), filepath.Join(dir, "missing-*/agent.*")}
+	t.Cleanup(func() { agentSockets = old })
+
+	got, err := Loopback().ForwardedAgents(context.Background())
+	if want := filepath.Join(dir, "agent.live"); err != nil || len(got) != 1 || got[0] != want {
+		t.Fatalf("got %q, %v; want only %s", got, err, want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "agent.stale")); !os.IsNotExist(err) {
+		t.Errorf("stale socket not removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "agent.file")); err != nil {
+		t.Errorf("plain file touched: %v", err)
+	}
+}

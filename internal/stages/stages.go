@@ -32,6 +32,7 @@ var All = []pipeline.Stage{
 	{ID: "2.4", Name: "Commit and push", Run: commitPush},
 	{ID: "3.1", Name: "Flake input", Run: flakeInput, Outdated: flakeInputOutdated},
 	{ID: "3.2", Name: "Rebuild", Run: rebuild},
+	{ID: "3.3", Name: "Cleanup", Run: cleanup},
 }
 
 // configFlake is the config flake, evaluated on the provider.

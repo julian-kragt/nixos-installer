@@ -121,13 +121,13 @@ internal/pipeline/       the engine every stage runs in
                          state.go           State, LoadState, Save, IsCompleted
 internal/machine/        running commands on a machine, and trusting and logging in to the target
                          machine.go         Machine: run a command here or on the target over ssh
-                         access.go          Access: check the host key, set up key login; agent keys
+                         access.go          Access: check the host key, set up key login; agent keys, forwarded agents left on a machine
                          authorized_keys.go InstallAuthorizedKeys: install the provider's keys on the target with the root password
                          hostkey.go         HostPin, ScanHostKey, WaitForNewHostKey: the one SSH host key trusted for a host
 internal/commands/       the commands the stages run, one package each
                          nix/           Config: nix eval of <config>#installerData, hosts, the bootstrap system
                          git/           Repo: prefix, upstream, dirty and deleted paths, commit, RequireCommitted
-                         luks/          the LUKS passphrase on the target
+                         luks/          the LUKS passphrase on the target, and its removal
                          nixosanywhere/ run nixos-anywhere, tell what a target runs
                          nixosrebuild/  nixos-rebuild switch on the target, waiting out a dropped connection
                          systemd/       failed units on a machine
@@ -139,7 +139,7 @@ internal/secrets/        the nix-secrets repo: file layout, .sops.yaml editor, t
 internal/stages/         one file per stage, which orchestrates; nothing else
                          stages.go    All: the ordered stage list
                          <id>_<name>.go, named by stage ID: 0_0_environment_preparation.go
-                         0_1_provider_preparation.go … 3_2_rebuild.go
+                         0_1_provider_preparation.go … 3_3_cleanup.go
 ```
 
 How a run goes: `main` parses the flags into `pipeline.Inputs`, `resolveInputs` asks for the missing target and host and loads `<state dir>/<host>.json`, then `pipeline.Run(ctx, env, stages.All)` runs the stages in list order. A stage whose ID is in `State.Completed` is skipped; every other stage is recorded and the state saved when it succeeds. A completed stage with an `Outdated` check runs again when the check gives a reason: it and every stage after it are first removed from `Completed` and the state saved, so a run that stops on the way still runs them next time. 1.2 is outdated without a recorded host recipient, 1.3 when the config's users are not the ones whose recipients are recorded, so a user added to or removed from the host runs the secrets phase again. 3.1 is outdated when the config no longer locks the recorded `SecretsCommit`. A stage with `Always: true` (0.0) runs every time and is never recorded.
@@ -185,7 +185,7 @@ Legacy = `install-host.sh` at `06dd040` in nixos-config.
 | 2.4 Commit/push | provider | `sops updatekeys -y hosts/<h>.yaml host-users/<h>-<u>.yaml`, `git add -A; commit; push` | Commit only the listed paths (not `-A`). Verify `sops:` metadata in every secret file. Persist SHA. |
 | 3.1 Flake input | provider | `nix flake update nix-secrets` + commit `flake.lock` (in config, on provider) | See §6.4. |
 | 3.2 Rebuild | target | `nixos-rebuild --flake .#<h> --target-host root@ip --build-host root@ip switch` (from provider) | Replaced: `nixos-rebuild switch --flake git+ssh://…?rev=<ConfigRev>#<h>` on the target with agent forwarding (`internal/commands/nixosrebuild`); legacy Phase 9's validation without the user-age-key checks. |
-| 3.3 Cleanup | target | `trap rm KNOWN_HOSTS` only | New: wipe temp creds, optional upstream revoke. |
+| 3.3 Cleanup | target | `trap rm KNOWN_HOSTS` only | Built. Removes a `/tmp/disko-password` still on the installed system, with a warning (`luks.Remove`), and fails while a forwarded agent still answers on the target (`Machine.ForwardedAgents`: `/root/.ssh/agent/*` since OpenSSH 10.1, `/tmp/ssh-*/agent.*` before; sockets nobody listens on are removed). Nothing to revoke: no deploy key exists. |
 | 4.1 Policy | provider/target | — | New: no plaintext, rule coverage for every `hosts/*`/`host-users/*`. |
 | 4.2 Recovery | — | `--enroll-sops`, `--deploy-remote` modes | Becomes "resume from persisted state". |
 
@@ -217,4 +217,4 @@ The numbers are the ones the roadmap and the stage prompts refer to. The roadmap
 - **Host key**: `machine.HostPin` keeps one key per host in `<state dir>/<host>.known_hosts`, and `machine.SSH` and `InstallAuthorizedKeys` accept only that key. nixos-anywhere cannot be given the pin (ROADMAP "Plumbing design", Host key). Stage 3.2 runs `nixos-rebuild` on the target, so it needs no ssh options from here, and checks the pin again after the switch.
 - **Tool helpers**: `internal/commands/nix`, `internal/commands/git`, `internal/commands/luks`, `internal/commands/nixosanywhere`, `internal/commands/hostidentity`, `internal/commands/sops`, `internal/commands/nixosrebuild` and `internal/commands/systemd` exist, each in its own package (§4). `.sops.yaml` editing is in-process.
 - **CLI** (`cmd/nixos-installer/flags.go`, `inputs.go`): `--target` (prompted when empty; IPv4, IPv6, or link-local IPv6 with zone such as `fe80::1%eth0`), `--host` (picked from the config's `bootstrapEntries` output when empty), `--config` (prompted when empty), `--secrets` (the nix-secrets clone; prompted when empty, must hold a `.sops.yaml`), `--ssh-password` (the ISO's root password for the first key install; prompted when key auth fails, it is empty and the target offers password login), `--reinstall` (deletes the chosen host's `<host>.json` and `<host>.known_hosts` before the state is loaded, so all stages run again; the target must be booted from the ISO to be installed again), `--generate-hardware` (generates a missing hardware config from the target in 0.1 without asking), `--verbose`. Planned: `install --host --target` (full) and `secrets --host --target` (Phase 2–3 resume, as in Pipeline 4.2, by filtering `stages.All`).
-- **Secrets hygiene**: never put secrets in argv or logs (the bash script followed this — keep it), always `umask 077` on target, cleanup in a deferred step even on failure.
+- **Secrets hygiene**: never put secrets in argv or logs (the bash script followed this — keep it), always `umask 077` on target. No cleanup runs when a stage fails, because nothing secret is left to clean: `/tmp/disko-password` lives only in the ISO's RAM, from 0.1 until 0.2 reboots into the installed system, and a retry of 0.2 needs it; sshd removes a forwarded agent when its session ends, Ctrl+C and a dropped connection included; the sops check on the target holds ciphertext only, in a temp file its `trap` removes. 3.3 checks the end state once, on the installed system.
