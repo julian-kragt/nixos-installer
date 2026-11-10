@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"installer/internal/pipeline"
 	"installer/internal/runner"
@@ -15,7 +17,8 @@ import (
 
 // recipients makes the nix-secrets clone's .sops.yaml say exactly who decrypts
 // the host's files: the host, and each user's own key on it. Files of users who
-// are no longer on the host are deleted; 2.4 commits that.
+// are no longer on the host are deleted; 2.4 commits that. It changes nothing
+// while a rule would shadow a secret file's own rule.
 func recipients(ctx context.Context, env *pipeline.Env) error {
 	users, err := hostUsers(ctx, env)
 	if err != nil {
@@ -39,14 +42,17 @@ func recipients(ctx context.Context, env *pipeline.Env) error {
 	if err != nil {
 		return err
 	}
-	if err := confirmReplacements(ctx, cfg.Replacements(want)); err != nil {
-		return err
-	}
-	removed, err := cfg.Apply(want)
+	stale, err := secrets.Stale(env.SecretsDir, env.Host, users)
 	if err != nil {
 		return err
 	}
-	for _, u := range removed {
+	if err := checkRuleOrder(env, cfg, users, stale); err != nil {
+		return err
+	}
+	if err := confirmReplacements(ctx, cfg.Replacements(want)); err != nil {
+		return err
+	}
+	for _, u := range cfg.Apply(want) {
 		runner.Info(ctx, "Removed the recipient of "+u+", who is no longer on "+env.Host)
 	}
 	out, err := cfg.Marshal()
@@ -60,10 +66,6 @@ func recipients(ctx context.Context, env *pipeline.Env) error {
 		runner.Info(ctx, "Updated "+secrets.ConfigFile)
 	}
 
-	stale, err := secrets.Stale(env.SecretsDir, env.Host, users)
-	if err != nil {
-		return err
-	}
 	for _, f := range stale {
 		if err := os.Remove(filepath.Join(env.SecretsDir, f)); err != nil {
 			return err
@@ -71,6 +73,29 @@ func recipients(ctx context.Context, env *pipeline.Env) error {
 		runner.Info(ctx, "Deleted "+f)
 	}
 	return nil
+}
+
+// checkRuleOrder fails unless every secret file in the clone, and every file
+// the host is to have, is encrypted with its own rule: sops uses the first rule
+// that matches a file, and a broader one before it would give the file other
+// recipients. The files of removed users, which are deleted, do not count.
+func checkRuleOrder(env *pipeline.Env, cfg *secrets.Config, users, stale []string) error {
+	files, err := secrets.RepoFiles(env.SecretsDir)
+	if err != nil {
+		return err
+	}
+	files = slices.DeleteFunc(files, func(f string) bool { return slices.Contains(stale, f) })
+	shadowed, err := cfg.Shadowed(append(files, secrets.Files(env.Host, users)...))
+	if err != nil || len(shadowed) == 0 {
+		return err
+	}
+	lines := make([]string, 0, len(shadowed))
+	for _, s := range shadowed {
+		lines = append(lines, "  "+s.String())
+	}
+	return fmt.Errorf("%s has rules that come before a secret file's own rule:\n%s\n"+
+		"sops uses the first rule that matches a file; put each file's own rule first in %s, then run the installer again",
+		secrets.ConfigFile, strings.Join(lines, "\n"), filepath.Join(env.SecretsDir, secrets.ConfigFile))
 }
 
 // confirmReplacements shows the recipients that change and requires the

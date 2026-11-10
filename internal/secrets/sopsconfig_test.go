@@ -3,6 +3,7 @@ package secrets
 import (
 	"bytes"
 	"flag"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -45,14 +46,14 @@ func marshalConfig(t *testing.T, c *Config) []byte {
 	return out
 }
 
-// apply is c.Apply(h), which must succeed.
+// apply is c.Apply(h) on a config in which nothing shadows h's files.
 func apply(t *testing.T, c *Config, h Host) []string {
 	t.Helper()
-	removed, err := c.Apply(h)
-	if err != nil {
-		t.Fatal(err)
+	users := slices.Sorted(maps.Keys(h.Users))
+	if shadowed, err := c.Shadowed(Files(h.Name, users)); err != nil || len(shadowed) != 0 {
+		t.Fatalf("shadowed = %+v, %v", shadowed, err)
 	}
-	return removed
+	return c.Apply(h)
 }
 
 // golden compares got with testdata/<name>.golden, or rewrites it with -update.
@@ -183,18 +184,12 @@ func TestRuleOfAHostWithALongerNameIsNotTouched(t *testing.T) {
 	}
 }
 
-func TestNewRuleGoesBeforeACatchAll(t *testing.T) {
-	c, err := ParseConfig([]byte("keys:\n  - &everyone age1all\ncreation_rules:\n  - key_groups:\n      - age:\n          - *everyone\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	apply(t, c, Host{Name: "atlas", Recipient: atlasKey})
-	if got, err := c.Recipients(HostFile("atlas")); err != nil || !slices.Equal(got, []string{atlasKey}) {
-		t.Errorf("recipients = %q, %v; the catch-all shadows the new rule", got, err)
-	}
-	out := string(marshalConfig(t, c))
-	if strings.Index(out, "path_regex") > strings.Index(out, "*everyone") {
-		t.Errorf("new rule after the catch-all:\n%s", out)
+func TestNewRuleGoesLast(t *testing.T) {
+	c := fixture(t)
+	apply(t, c, Host{Name: "broadway", Recipient: "age1broadway"})
+	rules := c.seq("creation_rules").Content
+	if v := value(rules[len(rules)-1], "path_regex"); v == nil || v.Value != HostRule("broadway") {
+		t.Errorf("last rule = %v, want broadway's", v)
 	}
 }
 
@@ -213,48 +208,62 @@ func TestRecipientsOfAnUncoveredFile(t *testing.T) {
 	}
 }
 
-// sops uses the first rule that matches a file, so the host's rule must come
-// before any broader rule, wherever it was.
-func TestHostRuleGoesBeforeABroaderRule(t *testing.T) {
+func TestFileRule(t *testing.T) {
+	if got, want := HostRule("atlas-dev"), `^hosts/atlas-dev\.yaml$`; got != want {
+		t.Errorf("HostRule = %s, want %s", got, want)
+	}
+	if got, want := UserRule("atlas", "jkragt"), `^host-users/atlas-jkragt\.yaml$`; got != want {
+		t.Errorf("UserRule = %s, want %s", got, want)
+	}
+}
+
+func TestNothingShadowedInTheFixture(t *testing.T) {
+	files := []string{HostFile("atlas"), HostFile("workhorse"), UserFile("atlas", "jkragt"), UserFile("workhorse", "jkragt"), HostFile("broadway")}
+	if shadowed, err := fixture(t).Shadowed(files); err != nil || len(shadowed) != 0 {
+		t.Errorf("shadowed = %+v, %v, want none", shadowed, err)
+	}
+}
+
+// sops uses the first rule that matches a file, so a broader rule before a
+// file's own rule, or before where Apply adds it, would win.
+func TestShadowed(t *testing.T) {
 	const broad = "  - path_regex: ^hosts/.*\\.yaml$\n    key_groups:\n      - age:\n          - *admin\n"
 	const noRegex = "  - key_groups:\n      - age:\n          - *admin\n"
 	const own = "  - path_regex: ^hosts/atlas\\.yaml$\n    key_groups:\n      - age:\n          - *host_atlas\n"
-	for name, rules := range map[string]string{
-		"anchored broad rule":        broad,
-		"rule without path_regex":    noRegex,
-		"own rule after a broad one": broad + own,
-	} {
-		t.Run(name, func(t *testing.T) {
-			c, err := ParseConfig([]byte("keys:\n  - &admin age1admin\n  - &host_atlas age1old\ncreation_rules:\n" + rules))
+	const other = "  - path_regex: ^hosts/workhorse\\.yaml$\n    key_groups:\n      - age:\n          - *admin\n"
+	files := []string{HostFile("atlas"), UserFile("atlas", "jkragt"), HostFile("atlas")}
+	tests := []struct {
+		name, rules string
+		want        []Shadow
+	}{
+		{"broad rule before the own one", broad + own, []Shadow{{HostFile("atlas"), `path_regex ^hosts/.*\.yaml$`}}},
+		{"broad rule and no own one", broad, []Shadow{{HostFile("atlas"), `path_regex ^hosts/.*\.yaml$`}}},
+		{"rule without path_regex", noRegex + own, []Shadow{
+			{HostFile("atlas"), "creation rule 1, which has no path_regex"},
+			{UserFile("atlas", "jkragt"), "creation rule 1, which has no path_regex"},
+		}},
+		{"own rule first", own + broad + noRegex, []Shadow{{UserFile("atlas", "jkragt"), "creation rule 3, which has no path_regex"}}},
+		{"another host's rule only", other, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, err := ParseConfig([]byte("keys:\n  - &admin age1admin\n  - &host_atlas age1old\ncreation_rules:\n" + tt.rules))
 			if err != nil {
 				t.Fatal(err)
 			}
-			apply(t, c, atlas)
-			for file, want := range map[string][]string{
-				HostFile("atlas"):           {atlasKey},
-				UserFile("atlas", "jkragt"): {atlasKey, jkragtAt},
-			} {
-				if got, err := c.Recipients(file); err != nil || !slices.Equal(got, want) {
-					t.Errorf("%s: recipients = %q, %v, want %q", file, got, err, want)
-				}
-			}
-			again, err := ParseConfig(marshalConfig(t, c))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got, err := again.Recipients(HostFile("atlas")); err != nil || !slices.Equal(got, []string{atlasKey}) {
-				t.Errorf("after a round trip: recipients = %q, %v", got, err)
+			if got, err := c.Shadowed(files); err != nil || !slices.Equal(got, tt.want) {
+				t.Errorf("shadowed = %+v, %v, want %+v", got, err, tt.want)
 			}
 		})
 	}
 }
 
-func TestApplyReportsABrokenRegex(t *testing.T) {
+func TestShadowedReportsABrokenRegex(t *testing.T) {
 	c, err := ParseConfig([]byte("creation_rules:\n  - path_regex: ^hosts/(\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Apply(atlas); err == nil || !strings.Contains(err.Error(), "path_regex") {
+	if _, err := c.Shadowed([]string{HostFile("atlas")}); err == nil || !strings.Contains(err.Error(), "path_regex") {
 		t.Errorf("err = %v, want the broken path_regex named", err)
 	}
 }

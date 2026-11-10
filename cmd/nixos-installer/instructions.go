@@ -17,7 +17,9 @@ const instructions = `Prepare the target machine first (it needs no operating sy
 Press Enter when the installer is running... `
 
 // showInstructions tells the operator how to prepare the target and waits for
-// Enter. Without an operator to ask (piped stdin) it carries on.
+// Enter. Without an operator to ask (piped stdin) it carries on. Stage 0.0 is
+// never recorded, so a host with no completed stage stands for one whose
+// target 0.0 has not yet reached.
 func showInstructions(ctx context.Context) error {
 	_, err := runner.Ask(ctx, instructions)
 	if errors.Is(err, io.EOF) {

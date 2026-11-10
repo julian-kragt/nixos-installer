@@ -48,13 +48,15 @@ func HostAnchor(host string) string { return "host_" + host }
 // UserAnchor names the recipient of user's age key on host.
 func UserAnchor(host, user string) string { return "user_" + user + "_" + host }
 
+// FileRule is the path_regex of the rule of file, relative to the repository:
+// it matches that file only.
+func FileRule(file string) string { return "^" + regexp.QuoteMeta(file) + "$" }
+
 // HostRule is the path_regex of host's own file.
-func HostRule(host string) string { return `^hosts/` + regexp.QuoteMeta(host) + `\.yaml$` }
+func HostRule(host string) string { return FileRule(HostFile(host)) }
 
 // UserRule is the path_regex of user's file on host.
-func UserRule(host, user string) string {
-	return `^host-users/` + regexp.QuoteMeta(host) + "-" + regexp.QuoteMeta(user) + `\.yaml$`
-}
+func UserRule(host, user string) string { return FileRule(UserFile(host, user)) }
 
 // Host is what .sops.yaml must say about one host's files: its own file is
 // encrypted to the host, a user's file to the host and that user's key on it.
@@ -93,22 +95,18 @@ func (c *Config) Replacements(h Host) []Replaced {
 }
 
 // Apply makes c say exactly h about h's files: the anchors with their
-// recipients, one rule per file with exactly its recipients, which sops uses
-// for that file. A recipient an operator wrote literally into such a rule
-// stays. Rules and anchors of users no longer on the host are removed;
-// it returns those users, sorted. An anchor that a rule of another host still
-// uses stays.
-func (c *Config) Apply(h Host) ([]string, error) {
+// recipients, one rule per file with exactly its recipients. A recipient an
+// operator wrote literally into such a rule stays. Rules and anchors of users
+// no longer on the host are removed; it returns those users, sorted. An anchor
+// that a rule of another host still uses stays. sops uses the first rule that
+// matches a file, so check with Shadowed first that no other rule would.
+func (c *Config) Apply(h Host) []string {
 	for _, a := range h.anchors() {
 		c.setKey(a.name, a.recipient)
 	}
-	if err := c.setRule(HostFile(h.Name), HostRule(h.Name), HostAnchor(h.Name)); err != nil {
-		return nil, err
-	}
+	c.setRule(HostRule(h.Name), HostAnchor(h.Name))
 	for _, u := range slices.Sorted(maps.Keys(h.Users)) {
-		if err := c.setRule(UserFile(h.Name, u), UserRule(h.Name, u), HostAnchor(h.Name), UserAnchor(h.Name, u)); err != nil {
-			return nil, err
-		}
+		c.setRule(UserRule(h.Name, u), HostAnchor(h.Name), UserAnchor(h.Name, u))
 	}
 
 	var removed []string
@@ -122,7 +120,51 @@ func (c *Config) Apply(h Host) ([]string, error) {
 		}
 		removed = append(removed, u)
 	}
-	return removed, nil
+	return removed
+}
+
+// Shadow is a file that sops would encrypt with another rule than its own,
+// because that rule comes first and matches it too.
+type Shadow struct {
+	File string
+	Rule string // the rule sops would use, as the operator finds it in .sops.yaml
+}
+
+func (s Shadow) String() string {
+	return fmt.Sprintf("%s: sops would use %s, not %s", s.File, s.Rule, FileRule(s.File))
+}
+
+// Shadowed returns the files, relative to the repository, whose first matching
+// rule is not their own (FileRule), in the order given. A file that no rule
+// matches is not one: its rule, when Apply adds it, comes last and is the
+// only one.
+func (c *Config) Shadowed(files []string) ([]Shadow, error) {
+	var out []Shadow
+	seen := map[string]bool{}
+	for _, file := range files {
+		if seen[file] {
+			continue
+		}
+		seen[file] = true
+		for i, rule := range c.rules() {
+			ok, err := matches(rule, file)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+			v := value(rule, "path_regex")
+			switch {
+			case v == nil:
+				out = append(out, Shadow{File: file, Rule: fmt.Sprintf("creation rule %d, which has no path_regex", i+1)})
+			case v.Value != FileRule(file):
+				out = append(out, Shadow{File: file, Rule: "path_regex " + v.Value})
+			}
+			break
+		}
+	}
+	return out, nil
 }
 
 // Recipients returns the recipients of the rule sops uses for file, the first
@@ -177,41 +219,24 @@ func (c *Config) removeKey(anchor string) {
 	keys.Content = slices.DeleteFunc(keys.Content, func(k *yaml.Node) bool { return k.Anchor == anchor })
 }
 
-// setRule makes the rule for regex, which matches file, list exactly anchors
-// by alias, in one age key group, which keeps the rule's literal recipients.
-// sops uses the first rule that matches a file, so the rule goes before any
-// other that matches file: a missing one there or at the end, an existing one
-// moved there. A rule that already says this is left as it is.
-func (c *Config) setRule(file, regex string, anchors ...string) error {
+// setRule makes the rule for regex list exactly anchors by alias, in one age
+// key group, which keeps the rule's literal recipients. An existing rule stays
+// where it is, a missing one is added at the end. A rule that already says
+// this is left as it is.
+func (c *Config) setRule(regex string, anchors ...string) {
 	rules := c.seq("creation_rules")
-	i := c.ruleIndex(regex)
-	var rule *yaml.Node
-	if i >= 0 {
-		rule = rules.Content[i]
+	if i := c.ruleIndex(regex); i >= 0 {
+		rule := rules.Content[i]
 		aliases, literals := ageKeys(rule)
-		if !slices.Equal(aliases, anchors) || len(value(rule, "key_groups").Content) != 1 {
+		if groups := value(rule, "key_groups"); !slices.Equal(aliases, anchors) || groups == nil || len(groups.Content) != 1 {
 			setValue(rule, "key_groups", keyGroups(anchors, literals))
 		}
-		rules.Content = slices.Delete(rules.Content, i, i+1)
-	} else {
-		rule = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		setValue(rule, "path_regex", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: regex})
-		setValue(rule, "key_groups", keyGroups(anchors, nil))
-		i = len(rules.Content)
+		return
 	}
-	at := i
-	for j, r := range rules.Content[:i] {
-		ok, err := matches(r, file)
-		if err != nil {
-			return err
-		}
-		if ok {
-			at = j
-			break
-		}
-	}
-	rules.Content = slices.Insert(rules.Content, at, rule)
-	return nil
+	rule := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	setValue(rule, "path_regex", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: regex})
+	setValue(rule, "key_groups", keyGroups(anchors, nil))
+	rules.Content = append(rules.Content, rule)
 }
 
 func (c *Config) removeRule(regex string) {
@@ -252,6 +277,14 @@ func (c *Config) ruleUsers(host string) []string {
 		}
 	}
 	return users
+}
+
+// rules returns the creation rules, without adding the key when it is missing.
+func (c *Config) rules() []*yaml.Node {
+	if v := value(c.root, "creation_rules"); v != nil && v.Kind == yaml.SequenceNode {
+		return v.Content
+	}
+	return nil
 }
 
 // seq returns the top-level sequence under key, adding an empty one when it is missing.

@@ -86,6 +86,26 @@ func TestStale(t *testing.T) {
 	}
 }
 
+func TestRepoFiles(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"hosts/workhorse.yaml", "hosts/atlas.yaml", "host-users/atlas-jkragt.yaml", "hosts/notes.txt", "templates/host.yaml"} {
+		path := filepath.Join(dir, f)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, err := RepoFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"host-users/atlas-jkragt.yaml", "hosts/atlas.yaml", "hosts/workhorse.yaml"}; !slices.Equal(files, want) {
+		t.Errorf("files = %q, want %q", files, want)
+	}
+}
+
 func TestManaged(t *testing.T) {
 	tests := []struct {
 		path string

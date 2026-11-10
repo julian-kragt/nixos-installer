@@ -336,3 +336,61 @@ func TestOriginURL(t *testing.T) {
 		t.Fatalf("got %q, %v", got, err)
 	}
 }
+
+func TestShowAndFilesInASubdirectory(t *testing.T) {
+	top := newRepo(t)
+	dir := filepath.Join(top, "sub")
+	write(t, dir, "host-users/x.yaml", "x")
+	write(t, dir, "host-users/y.yaml", "y")
+	sh(t, top, "add", ".")
+	sh(t, top, "commit", "-q", "-m", "files")
+	r := Repo{machine.Local(), dir}
+	head, err := r.Head(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, "a", "changed")
+
+	if data, ok, err := r.Show(ctx, head, "a"); err != nil || !ok || string(data) != "1" {
+		t.Errorf("show a = %q, %v, %v, want the committed content", data, ok, err)
+	}
+	if _, ok, err := r.Show(ctx, head, "missing"); err != nil || ok {
+		t.Errorf("show missing = %v, %v", ok, err)
+	}
+	if _, _, err := r.Show(ctx, "0000000000000000000000000000000000000000", "a"); err == nil {
+		t.Error("show at an unknown commit: no error")
+	}
+	files, err := r.Files(ctx, head, "host-users")
+	if want := []string{"host-users/x.yaml", "host-users/y.yaml"}; err != nil || !slices.Equal(files, want) {
+		t.Errorf("files = %q, %v, want %q", files, err, want)
+	}
+	if files, err := r.Files(ctx, head, "none"); err != nil || len(files) != 0 {
+		t.Errorf("files of a missing dir = %q, %v", files, err)
+	}
+}
+
+func TestOnUpstream(t *testing.T) {
+	dir := newRepo(t)
+	pushed(t, dir)
+	r := Repo{machine.Local(), dir}
+	head, err := r.Head(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pushFrom(t, dir)
+	if ok, err := r.OnUpstream(ctx, head); err != nil || !ok {
+		t.Errorf("pushed commit: %v, %v", ok, err)
+	}
+	write(t, dir, "b", "2")
+	sh(t, dir, "commit", "-q", "-am", "local")
+	local, err := r.Head(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := r.OnUpstream(ctx, local); err != nil || ok {
+		t.Errorf("local commit: %v, %v", ok, err)
+	}
+	if _, err := r.OnUpstream(ctx, "0000000000000000000000000000000000000000"); err == nil {
+		t.Error("unknown commit: no error")
+	}
+}

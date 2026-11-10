@@ -8,7 +8,7 @@ Replace `install-host.sh` and `just install | enroll-sops | deploy-remote` with 
 
 ## State of things (2026-11-07)
 
-- **installer**: stages are plain functions listed in `stages.All`; `machine.Machine` runs a command on the provider or, through the system `ssh`, on the target; `pipeline.State` (`Host`, `Completed`, `HostRecipient`, `UserRecipients`, `SecretsCommit`, `ConfigRev`) is one JSON file per host. Stages 0.0 to 3.3 exist and orchestrate; their logic lives in `internal/machine`, `internal/secrets` (the nix-secrets layout, the `.sops.yaml` editor, templates and checks), `internal/commands/nix`, `internal/commands/git`, `internal/commands/luks`, `internal/commands/nixosanywhere`, `internal/commands/hostidentity`, `internal/commands/sops`, `internal/commands/mkpasswd`, `internal/commands/vim`, `internal/commands/nixosrebuild` and `internal/commands/systemd` (0.2 re-asks the passphrase with `luks.Ensure` when `/tmp/disko-password` is gone). `machine.SSH` and `InstallAuthorizedKeys` check the host key pinned in `<state dir>/<host>.known_hosts`. Build and tests are green. 0.0 to 2.4 have finished on atlas (2026-11-06; its `SecretsCommit` is `5c6778e`); 3.1 to 3.3 have not run there yet.
+- **installer**: stages are plain functions listed in `stages.All`; `machine.Machine` runs a command on the provider or, through the system `ssh`, on the target; `pipeline.State` (`Host`, `Completed`, `HostRecipient`, `UserRecipients`, `SecretsCommit`, `ConfigRev`) is one JSON file per host. Stages 0.0 to 4.1 exist and orchestrate; their logic lives in `internal/machine`, `internal/secrets` (the nix-secrets layout, the `.sops.yaml` editor, templates and checks), `internal/commands/nix`, `internal/commands/git`, `internal/commands/luks`, `internal/commands/nixosanywhere`, `internal/commands/hostidentity`, `internal/commands/sops`, `internal/commands/mkpasswd`, `internal/commands/vim`, `internal/commands/nixosrebuild` and `internal/commands/systemd` (0.2 re-asks the passphrase with `luks.Ensure` when `/tmp/disko-password` is gone). `machine.SSH` and `InstallAuthorizedKeys` check the host key pinned in `<state dir>/<host>.known_hosts`. Build and tests are green. 0.0 to 2.4 have finished on atlas (2026-11-06; its `SecretsCommit` is `5c6778e`); 3.1 to 4.1 have not run there yet.
 - **nix-secrets**: a setup only, not in use (CONTEXT §3). The layout is `hosts/<host>.yaml` + `host-users/<host>-<user>.yaml`, and `.sops.yaml` has anchored regexes, but no secret in it is relied on. The provider has a clone at `../nix-secrets`, which the installer gets with `--secrets`. `templates/user.yaml` = `hashedPassword` only.
 - **config**: reads `host-users/…`. User SSH keys no longer come from secrets, so the only per-user secret is `hashedPassword`, decrypted by system sops-nix with the host's age key. The config's `installer.<host>` adapter and hand-written `<host>-bootstrap` systems are gone: its `bootstrap/` entries feed the nixos-bootstrap input, which generates `<host>-bootstrap` and `installerData.<host>`, and the installer reads `<config>#installerData.<host>` (`internal/commands/nix`). B3 below is done. `install-host.sh` and its just recipes are removed, so **the Go installer is the only install path, and it is not complete yet**.
 - **provider (workhorse)**: has `nix`, `git`, `ssh`; `go` comes from `nix develop`; no `sops`, `age`, `ssh-to-age` in PATH. The secrets phase needs `sops`, `mkpasswd` and `vim` there: the installer's wrapper and `nix develop` add them (the system's vim comes first).
@@ -32,7 +32,7 @@ Replace `install-host.sh` and `just install | enroll-sops | deploy-remote` with 
 
 There is no separate plumbing milestone: shared plumbing is built by the first stage that needs it.
 
-Built: 0.0 to 3.3; on atlas 0.0 to 2.4 have run to the end. `00-prep` is done (see "Verified assumptions"). Next: run 3.1 to 3.3 on atlas, then 4.1.
+Built: 0.0 to 4.1; on atlas 0.0 to 2.4 have run to the end. `00-prep` is done (see "Verified assumptions"). Next: run 3.1 to 4.1 on atlas, then 4.2.
 
 | # | Stage | Runs on | Needs | Introduces shared plumbing | Writes State | Prompt |
 |---|---|---|---|---|---|---|
@@ -51,7 +51,7 @@ Built: 0.0 to 3.3; on atlas 0.0 to 2.4 have run to the end. `00-prep` is done (s
 | 3.1 | Flake input | provider | 2.4 | – | `ConfigRev` | [3.1-flake-input.md](prompts/3.1-flake-input.md) |
 | 3.2 | Rebuild | target | 3.1, B3 | agent forwarding on `Machine` | – | [3.2-rebuild.md](prompts/3.2-rebuild.md) |
 | 3.3 | Cleanup | target | 3.2 | – | – | [3.3-cleanup.md](prompts/3.3-cleanup.md) |
-| 4.1 | Policy | provider | 2.4 | – | – | [4.1-policy.md](prompts/4.1-policy.md) |
+| 4.1 | Pushed secrets | provider | 3.3 | `git.Repo` `Show` / `Files` / `OnUpstream`, `sops.StaticProblem` | – | [4.1-pushed-secrets.md](prompts/4.1-pushed-secrets.md) |
 | 4.2 | Recovery (CLI) | provider | all | subcommands, re-run of done stages | – | [4.2-recovery-cli.md](prompts/4.2-recovery-cli.md) |
 | – | Finish retiring bash | both repos | all | – | – | [retire-bash.md](prompts/retire-bash.md) |
 

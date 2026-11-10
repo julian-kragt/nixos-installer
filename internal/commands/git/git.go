@@ -183,6 +183,43 @@ func (r Repo) Head(ctx context.Context) (string, error) {
 	return strings.TrimSpace(out), err
 }
 
+// Show returns the content of path (relative to Dir) at commit rev, and
+// whether the commit has that file.
+func (r Repo) Show(ctx context.Context, rev, path string) ([]byte, bool, error) {
+	listed, err := r.run(ctx, "ls-tree", "--name-only", rev, "--", path)
+	if err != nil || strings.TrimSpace(listed) == "" {
+		return nil, false, err
+	}
+	out, err := r.run(ctx, "show", rev+":./"+path)
+	return []byte(out), err == nil, err
+}
+
+// Files returns the files at commit rev in dir (relative to Dir), relative to Dir.
+func (r Repo) Files(ctx context.Context, rev, dir string) ([]string, error) {
+	out, err := r.run(ctx, "ls-tree", "--name-only", rev, "--", strings.TrimSuffix(dir, "/")+"/")
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(out), nil
+}
+
+// OnUpstream fetches and reports whether commit rev is on the upstream of the
+// current branch.
+func (r Repo) OnUpstream(ctx context.Context, rev string) (bool, error) {
+	if _, err := r.run(ctx, "fetch"); err != nil {
+		return false, err
+	}
+	_, err := r.Machine.Quiet().Run(ctx, "git", "-C", r.Dir, "merge-base", "--is-ancestor", rev, "@{upstream}")
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check that %.7s is on the upstream of %s: %w", rev, r.Dir, err)
+	}
+	return true, nil
+}
+
 // OriginURL returns the URL of the remote origin as an ssh:// URL, the form a
 // git+ssh flake URL takes.
 func (r Repo) OriginURL(ctx context.Context) (string, error) {

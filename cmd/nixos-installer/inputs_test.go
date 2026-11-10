@@ -168,17 +168,34 @@ func TestResolveInputsCompletesInputsAndLoadsState(t *testing.T) {
 	}
 
 	secretsDir := newSecrets(t)
-	ctx, _ := operator("\n192.168.1.100\n" + secretsDir + "\n2\n") // Enter, target, secrets, host
+	ctx, out := operator(secretsDir + "\n2\n192.168.1.100\n") // secrets, host, target
 	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas", "broadway")}
 	st, err := resolveInputs(ctx, &in, stateDir)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "Prepare the target") {
+		t.Errorf("instructions shown to a host with a completed stage:\n%s", out.String())
 	}
 	if in.Target != "192.168.1.100" || in.Host != "broadway" || in.SecretsDir != secretsDir {
 		t.Errorf("inputs: %+v", in)
 	}
 	if st.Host != "broadway" || len(st.Completed) != 1 {
 		t.Errorf("state: %+v", st)
+	}
+}
+
+func TestResolveInputsShowsInstructionsToANewHost(t *testing.T) {
+	ctx, out := operator("\n192.168.1.100\n") // Enter, target
+	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas"), SecretsDir: newSecrets(t)}
+	if _, err := resolveInputs(ctx, &in, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if in.Target != "192.168.1.100" {
+		t.Errorf("target = %q", in.Target)
+	}
+	if !strings.Contains(out.String(), "Prepare the target") {
+		t.Errorf("no instructions for a new host:\n%s", out.String())
 	}
 }
 

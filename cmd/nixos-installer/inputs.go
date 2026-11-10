@@ -17,19 +17,15 @@ import (
 	"installer/internal/runner"
 )
 
-// resolveInputs asks for whatever the flags left empty (target, config, secrets, host) and
-// loads the persisted state of the chosen host, since state is keyed by host
-// name, after deleting it when in.Reinstall is set. in is completed in place.
+// resolveInputs asks for whatever the flags left empty (config, secrets, host,
+// target) and loads the persisted state of the chosen host, since state is
+// keyed by host name, after deleting it when in.Reinstall is set. The target
+// is asked last: how to prepare it is shown only to a host that has no
+// completed stage yet, which is known once its state is loaded. in is
+// completed in place.
 func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*pipeline.State, error) {
-	if err := showInstructions(ctx); err != nil {
-		return nil, err
-	}
 	var st *pipeline.State
 	err := runner.Run(ctx, "Checking inputs", func(ctx context.Context) error {
-		target, err := askTarget(ctx, in.Target)
-		if err != nil {
-			return err
-		}
 		configDir, err := askConfigDir(ctx, in.ConfigDir)
 		if err != nil {
 			return err
@@ -46,7 +42,7 @@ func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*
 		if err != nil {
 			return err
 		}
-		in.Target, in.ConfigDir, in.SecretsDir, in.Host = target, configDir, secretsDir, host
+		in.ConfigDir, in.SecretsDir, in.Host = configDir, secretsDir, host
 
 		if in.Reinstall {
 			if err := pipeline.RemoveState(stateDir, host); err != nil {
@@ -58,6 +54,16 @@ func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*
 		if err != nil {
 			return err
 		}
+		if len(st.Completed) == 0 {
+			if err := showInstructions(ctx); err != nil {
+				return err
+			}
+		}
+		target, err := askTarget(ctx, in.Target)
+		if err != nil {
+			return err
+		}
+		in.Target = target
 		runner.Info(ctx, "Target: "+target)
 		runner.Info(ctx, "Host: "+host)
 		return nil

@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 	"time"
 
@@ -14,7 +12,6 @@ import (
 	"installer/internal/machine"
 	"installer/internal/pipeline"
 	"installer/internal/runner"
-	"installer/internal/secrets"
 )
 
 // switchReconnectTimeout is how long the target may take to answer again when
@@ -88,12 +85,8 @@ func readRebuildPlan(ctx context.Context, env *pipeline.Env) (rebuildPlan, error
 	if err != nil {
 		return plan, err
 	}
-	info, err := at.HostInfo(ctx, env.Host)
+	users, err := hostUsersAt(ctx, env, env.State.ConfigRev)
 	if err != nil {
-		return plan, err
-	}
-	users := slices.Sorted(maps.Keys(info.Users))
-	if err := secrets.CheckNames(env.Host, users); err != nil {
 		return plan, err
 	}
 	passwordUsers, err := at.PasswordUsers(ctx, env.Host)

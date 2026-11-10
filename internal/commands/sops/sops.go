@@ -242,11 +242,10 @@ func hasPlain(n *yaml.Node) bool {
 	return false
 }
 
-// Problem says why a secret file needs its values asked for again, or "" when
-// it is fine: it exists, is encrypted to exactly want, the key at keyFile on
-// target decrypts it and its fields pass secrets.Check against keys.
-// ciphertext is nil for a missing file.
-func Problem(ctx context.Context, target machine.Machine, keyFile string, ciphertext []byte, want []string, keys []secrets.TemplateKey) (string, error) {
+// StaticProblem is the part of Problem that needs no key: it says why a secret
+// file is not one encrypted to exactly want, or "" when it is. ciphertext is
+// nil for a missing file.
+func StaticProblem(ciphertext []byte, want []string) (string, error) {
 	if ciphertext == nil {
 		return "missing", nil
 	}
@@ -259,6 +258,17 @@ func Problem(ctx context.Context, target machine.Machine, keyFile string, cipher
 	}
 	if !slices.Equal(slices.Sorted(slices.Values(have)), slices.Sorted(slices.Values(want))) {
 		return "encrypted to other recipients than " + secrets.ConfigFile + " gives it", nil
+	}
+	return "", nil
+}
+
+// Problem says why a secret file needs its values asked for again, or "" when
+// it is fine: it exists, is encrypted to exactly want, the key at keyFile on
+// target decrypts it and its fields pass secrets.Check against keys.
+// ciphertext is nil for a missing file.
+func Problem(ctx context.Context, target machine.Machine, keyFile string, ciphertext []byte, want []string, keys []secrets.TemplateKey) (string, error) {
+	if problem, err := StaticProblem(ciphertext, want); problem != "" || err != nil {
+		return problem, err
 	}
 	fields, err := Fields(ctx, target, keyFile, ciphertext)
 	if errors.Is(err, ErrCannotDecrypt) {

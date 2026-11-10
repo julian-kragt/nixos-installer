@@ -33,6 +33,7 @@ var All = []pipeline.Stage{
 	{ID: "3.1", Name: "Flake input", Run: flakeInput, Outdated: flakeInputOutdated},
 	{ID: "3.2", Name: "Rebuild", Run: rebuild},
 	{ID: "3.3", Name: "Cleanup", Run: cleanup},
+	{ID: "4.1", Name: "Pushed secrets", Run: pushedSecrets},
 }
 
 // configFlake is the config flake, evaluated on the provider.
@@ -77,8 +78,23 @@ func hostUsers(ctx context.Context, env *pipeline.Env) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return usersOf(env.Host, info)
+}
+
+// hostUsersAt is hostUsers as the config at commit rev defines them.
+func hostUsersAt(ctx context.Context, env *pipeline.Env, rev string) ([]string, error) {
+	info, err := configFlake(env).At(rev).HostInfo(ctx, env.Host)
+	if err != nil {
+		return nil, err
+	}
+	return usersOf(env.Host, info)
+}
+
+// usersOf returns the normal users in info, sorted. It fails when a name does
+// not fit the nix-secrets layout.
+func usersOf(host string, info nix.HostInfo) ([]string, error) {
 	users := slices.Sorted(maps.Keys(info.Users))
-	if err := secrets.CheckNames(env.Host, users); err != nil {
+	if err := secrets.CheckNames(host, users); err != nil {
 		return nil, err
 	}
 	return users, nil
