@@ -66,23 +66,6 @@ func FileUser(host, path string) (string, bool) {
 	return user, ok && userName.MatchString(user)
 }
 
-// RepoFiles returns the secret files in the repository at dir, hosts' and
-// users', relative to dir and sorted.
-func RepoFiles(dir string) ([]string, error) {
-	var files []string
-	for _, sub := range []string{"hosts", "host-users"} {
-		matches, err := filepath.Glob(filepath.Join(dir, sub, "*.yaml"))
-		if err != nil {
-			return nil, fmt.Errorf("list %s: %w", sub, err)
-		}
-		for _, m := range matches {
-			files = append(files, sub+"/"+filepath.Base(m))
-		}
-	}
-	slices.Sort(files)
-	return files, nil
-}
-
 // Stale returns the user files of host in the repository at dir that belong
 // to none of users, relative to dir.
 func Stale(dir, host string, users []string) ([]string, error) {

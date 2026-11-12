@@ -5,11 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"installer/internal/machine"
 	"installer/internal/pipeline"
+	"installer/internal/secrets"
 )
 
 // encrypted is a stand-in for a sops file; the stages only look at its shape.
@@ -168,13 +170,15 @@ func TestCommitPushRefusesPlaintext(t *testing.T) {
 	}
 }
 
-// A rule before a file's own rule, here one without path_regex, fails 2.2
-// before it changes anything.
+// A rule before an existing rule of one of the host's files, here one
+// without path_regex, fails 2.2 before it changes anything. Other hosts'
+// files are not checked.
 func TestRecipientsRefusesAShadowingRule(t *testing.T) {
 	env, _ := secretsEnv(t)
 	path := filepath.Join(env.SecretsDir, ".sops.yaml")
-	put(t, env.SecretsDir, ".sops.yaml", "keys:\n  - &host_other age1other\ncreation_rules:\n"+
+	put(t, env.SecretsDir, ".sops.yaml", "keys:\n  - &host_other age1other\n  - &host_atlas age1atlas\ncreation_rules:\n"+
 		"  - key_groups:\n      - age:\n          - *host_other\n"+
+		"  - path_regex: ^hosts/atlas\\.yaml$\n    key_groups:\n      - age:\n          - *host_atlas\n"+
 		"  - path_regex: ^hosts/other\\.yaml$\n    key_groups:\n      - age:\n          - *host_other\n")
 	before, err := os.ReadFile(path)
 	if err != nil {
@@ -183,21 +187,49 @@ func TestRecipientsRefusesAShadowingRule(t *testing.T) {
 
 	err = recipients(context.Background(), env)
 	if err == nil {
-		t.Fatal("2.2 accepted a catch-all before the rules")
+		t.Fatal("2.2 accepted a catch-all before atlas' rule")
 	}
-	for _, f := range []string{"hosts/atlas.yaml", "host-users/atlas-jkragt.yaml", "host-users/other-jkragt.yaml"} {
-		if !strings.Contains(err.Error(), f) {
-			t.Errorf("err = %v, want %s named", err, f)
+	if !strings.Contains(err.Error(), "hosts/atlas.yaml") {
+		t.Errorf("err = %v, want hosts/atlas.yaml named", err)
+	}
+	// jkragt's file has no rule yet, the others are not atlas' files.
+	for _, f := range []string{"host-users/atlas-jkragt.yaml", "hosts/other.yaml", "host-users/other-jkragt.yaml", "atlas-gone"} {
+		if strings.Contains(err.Error(), f) {
+			t.Errorf("err = %v names %s", err, f)
 		}
-	}
-	if strings.Contains(err.Error(), "atlas-gone") {
-		t.Errorf("err = %v names the file of the removed user", err)
 	}
 	if after, _ := os.ReadFile(path); string(after) != string(before) {
 		t.Errorf(".sops.yaml changed:\n%s", after)
 	}
 	if _, err := os.Stat(filepath.Join(env.SecretsDir, "host-users/atlas-gone.yaml")); err != nil {
 		t.Errorf("file of the removed user: %v, want it kept", err)
+	}
+}
+
+// A new host's rules go before a trailing catch-all, so sops uses them.
+func TestRecipientsAddsRulesBeforeACatchAll(t *testing.T) {
+	env, _ := secretsEnv(t)
+	put(t, env.SecretsDir, ".sops.yaml", "keys:\n  - &host_other age1other\ncreation_rules:\n"+
+		"  - path_regex: ^hosts/other\\.yaml$\n    key_groups:\n      - age:\n          - *host_other\n"+
+		"  - key_groups:\n      - age:\n          - *host_other\n")
+	if err := recipients(context.Background(), env); err != nil {
+		t.Fatalf("2.2: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(env.SecretsDir, ".sops.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := secrets.ParseConfig(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for file, want := range map[string][]string{
+		"hosts/atlas.yaml":             {"age1atlas"},
+		"host-users/atlas-jkragt.yaml": {"age1atlas", "age1jkragt"},
+	} {
+		if got, err := cfg.Recipients(file); err != nil || !slices.Equal(got, want) {
+			t.Errorf("%s: recipients = %q, %v, want %q", file, got, err, want)
+		}
 	}
 }
 
