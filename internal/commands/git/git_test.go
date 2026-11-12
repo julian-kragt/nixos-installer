@@ -12,6 +12,15 @@ import (
 	"installer/internal/machine"
 )
 
+// TestMain gives git an identity, so commits work without the developer's
+// config, as in the Nix build's sandbox.
+func TestMain(m *testing.M) {
+	for k, v := range map[string]string{"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"} {
+		os.Setenv(k, v)
+	}
+	os.Exit(m.Run())
+}
+
 var ctx = context.Background()
 
 func sh(t *testing.T, dir string, args ...string) {
