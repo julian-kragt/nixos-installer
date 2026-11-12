@@ -75,6 +75,16 @@ func recipients(ctx context.Context, env *pipeline.Env) error {
 	return nil
 }
 
+// recipientsOutdated asks for 2.2 again, and so 2.3 to 2.5, when 2.4 pushed a
+// commit that 2.5 did not pass: those stages fix what they can in the clone,
+// push it and check again.
+func recipientsOutdated(_ context.Context, env *pipeline.Env) (string, error) {
+	if env.State.IsCompleted(stageCommitPush) && !env.State.IsCompleted(stagePushedSecrets) {
+		return fmt.Sprintf("the pushed nix-secrets commit %.7s has not passed stage %s", env.State.SecretsCommit, stagePushedSecrets), nil
+	}
+	return "", nil
+}
+
 // checkRuleOrder fails unless each of the host's files that has a rule of its
 // own is encrypted with it: sops uses the first rule that matches a file, and
 // a broader one before it would give the file other recipients. A file

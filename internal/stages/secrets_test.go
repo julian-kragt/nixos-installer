@@ -273,7 +273,7 @@ func encryptedTo(recipients ...string) string {
 	return s
 }
 
-// pushedEnv returns an Env after 2.2 to 3.1: atlas' files committed, pushed
+// pushedEnv returns an Env after 2.2 to 2.4: atlas' files committed, pushed
 // and recorded as SecretsCommit.
 func pushedEnv(t *testing.T) *pipeline.Env {
 	t.Helper()
@@ -287,7 +287,6 @@ func pushedEnv(t *testing.T) *pipeline.Env {
 	if err := commitPush(ctx, env); err != nil {
 		t.Fatal(err)
 	}
-	env.State.ConfigRev = "c0ffee"
 	return env
 }
 
@@ -333,6 +332,27 @@ func TestPushedSecretsReportsEveryProblem(t *testing.T) {
 		{"not pushed", func(t *testing.T, dir string) {
 			put(t, dir, "notes", "local")
 		}, false, []string{"is not on the upstream"}},
+		// Without .sops.yaml the checks that need no recipients still run.
+		{"no .sops.yaml", func(t *testing.T, dir string) {
+			gitIn(t, dir, "rm", "-q", ".sops.yaml")
+			put(t, dir, "hosts/atlas.yaml", "hashedPassword: plain\n")
+			put(t, dir, "host-users/atlas-gone.yaml", encryptedTo("age1atlas"))
+		}, true, []string{
+			".sops.yaml: missing",
+			"hosts/atlas.yaml: hashedPassword is not encrypted",
+			"host-users/atlas-gone.yaml: gone is no longer a user of atlas",
+		}},
+		{"no rule and plaintext", func(t *testing.T, dir string) {
+			data, err := os.ReadFile(filepath.Join(dir, ".sops.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := strings.Replace(string(data), `^host-users/atlas-jkragt\.yaml$`, `^host-users/nobody\.yaml$`, 1)
+			put(t, dir, ".sops.yaml", cfg)
+			put(t, dir, "host-users/atlas-jkragt.yaml", "hashedPassword: plain\n")
+		}, true, []string{
+			"host-users/atlas-jkragt.yaml: hashedPassword is not encrypted; .sops.yaml: no creation rule matches host-users/atlas-jkragt.yaml",
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -354,6 +374,40 @@ func TestPushedSecretsReportsEveryProblem(t *testing.T) {
 				if !strings.Contains(err.Error(), w) {
 					t.Errorf("err = %v\nwant %q in it", err, w)
 				}
+			}
+		})
+	}
+}
+
+func TestPushedSecretsReportsAMissingUpstream(t *testing.T) {
+	env := pushedEnv(t)
+	gitIn(t, env.SecretsDir, "branch", "--unset-upstream")
+	err := pushedSecrets(context.Background(), env)
+	if err == nil || !strings.Contains(err.Error(), "on the upstream") {
+		t.Fatalf("err = %v, want the upstream check reported", err)
+	}
+	if !strings.Contains(err.Error(), "the next run repeats stages 2.2 to 2.5") {
+		t.Errorf("err = %v, want the way forward", err)
+	}
+}
+
+// A failed 2.5 makes the next run repeat 2.2 to 2.5 against a new commit.
+func TestRecipientsOutdatedUntilThePushedSecretsPass(t *testing.T) {
+	tests := []struct {
+		name       string
+		completed  []string
+		wantReason bool
+	}{
+		{"secrets phase running", []string{"2.1", "2.2", "2.3"}, false},
+		{"2.5 failed", []string{"2.1", "2.2", "2.3", "2.4"}, true},
+		{"2.5 passed", []string{"2.1", "2.2", "2.3", "2.4", "2.5"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := &pipeline.Env{State: &pipeline.State{Completed: tt.completed, SecretsCommit: secretsCommit}}
+			reason, err := recipientsOutdated(context.Background(), env)
+			if err != nil || (reason != "") != tt.wantReason {
+				t.Errorf("reason = %q, %v, want one: %v", reason, err, tt.wantReason)
 			}
 		})
 	}

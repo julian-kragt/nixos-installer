@@ -173,6 +173,32 @@ func TestFlakeInputOutdated(t *testing.T) {
 	}
 }
 
+// After another host's install moved the config's lock, 2.4 runs again so a
+// new SecretsCommit is recorded for 3.1 to lock; before 3.1 it is not asked.
+func TestCommitPushOutdatedWhenTheLockMoved(t *testing.T) {
+	env, _ := flakeEnv(t)
+	put(t, env.ConfigDir, "flake.lock", lockFile("4444444444444444444444444444444444444444"))
+	tests := []struct {
+		name       string
+		completed  []string
+		recorded   string
+		wantReason string
+	}{
+		{"before 3.1", []string{"2.4"}, secretsCommit, ""},
+		{"lock moved", []string{"2.4", "2.5", "3.1"}, secretsCommit, "the config locks nix-secrets at 4444444, not at 5c6778e"},
+		{"lock in place", []string{"2.4", "2.5", "3.1"}, "4444444444444444444444444444444444444444", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env.State.Completed, env.State.SecretsCommit = tt.completed, tt.recorded
+			reason, err := commitPushOutdated(context.Background(), env)
+			if err != nil || reason != tt.wantReason {
+				t.Errorf("reason = %q, %v, want %q", reason, err, tt.wantReason)
+			}
+		})
+	}
+}
+
 func TestRebuildNeedsAConfigRevision(t *testing.T) {
 	env, _ := flakeEnv(t) // records no ConfigRev
 	if err := rebuild(context.Background(), env); err == nil || !strings.Contains(err.Error(), "run stage 3.1 first") {

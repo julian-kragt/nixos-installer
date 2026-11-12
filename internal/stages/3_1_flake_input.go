@@ -91,7 +91,8 @@ func lockSecrets(ctx context.Context, env *pipeline.Env) error {
 }
 
 // flakeInputOutdated asks for 3.1 again when no config revision is recorded
-// or the config no longer locks the recorded nix-secrets commit.
+// or the config does not lock the recorded nix-secrets commit, as after 2.4
+// ran again and recorded a new one.
 func flakeInputOutdated(_ context.Context, env *pipeline.Env) (string, error) {
 	if env.State.ConfigRev == "" {
 		return "no config revision is recorded", nil

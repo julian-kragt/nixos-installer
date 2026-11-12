@@ -73,7 +73,11 @@ func rebuild(ctx context.Context, env *pipeline.Env) error {
 func readRebuildPlan(ctx context.Context, env *pipeline.Env) (rebuildPlan, error) {
 	var plan rebuildPlan
 	// The flake URL names the repository, so the flake must be at its top.
-	if prefix, err := configRepo(env).Prefix(ctx); err != nil || prefix != "" {
+	prefix, err := configRepo(env).Prefix(ctx)
+	if err != nil {
+		return plan, fmt.Errorf("%s: %w", env.ConfigDir, err)
+	}
+	if prefix != "" {
 		return plan, fmt.Errorf("%s is not the top of a git repository; the target fetches the config from its origin's top", env.ConfigDir)
 	}
 	configURL, err := configRepo(env).OriginURL(ctx)
@@ -85,7 +89,11 @@ func readRebuildPlan(ctx context.Context, env *pipeline.Env) (rebuildPlan, error
 	if err != nil {
 		return plan, err
 	}
-	users, err := hostUsersAt(ctx, env, env.State.ConfigRev)
+	info, err := at.HostInfo(ctx, env.Host)
+	if err != nil {
+		return plan, err
+	}
+	users, err := usersOf(env.Host, info)
 	if err != nil {
 		return plan, err
 	}

@@ -62,3 +62,21 @@ func commitPush(ctx context.Context, env *pipeline.Env) error {
 	runner.Info(ctx, "nix-secrets is at "+head)
 	return nil
 }
+
+// commitPushOutdated asks for 2.4 again, and so 2.5 and 3.1 on, when 3.1 has
+// locked SecretsCommit into the config and the config now locks another
+// commit, as after another host's install: 2.4 then records the commit the
+// clone is at, which 3.1 can lock.
+func commitPushOutdated(_ context.Context, env *pipeline.Env) (string, error) {
+	if !env.State.IsCompleted(stageFlakeInput) {
+		return "", nil
+	}
+	rev, err := configFlake(env).LockedRev(secretsInput)
+	if err != nil {
+		return "", err
+	}
+	if rev != env.State.SecretsCommit {
+		return fmt.Sprintf("the config locks nix-secrets at %.7s, not at %.7s", rev, env.State.SecretsCommit), nil
+	}
+	return "", nil
+}

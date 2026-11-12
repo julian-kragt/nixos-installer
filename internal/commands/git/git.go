@@ -21,6 +21,26 @@ func (r Repo) run(ctx context.Context, args ...string) (string, error) {
 	return r.Machine.Run(ctx, "git", append([]string{"-C", r.Dir}, args...)...)
 }
 
+// quietRun runs a git command whose exit status is the answer, so a failure
+// is not reported as one. It returns git's exit status, or -1 when git did not
+// run, and the error.
+func (r Repo) quietRun(ctx context.Context, args ...string) (int, error) {
+	_, err := r.Machine.Quiet().Run(ctx, "git", append([]string{"-C", r.Dir}, args...)...)
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		return 0, nil
+	case errors.As(err, &exit):
+		return exit.ExitCode(), err
+	}
+	return -1, err
+}
+
+func (r Repo) fetch(ctx context.Context) error {
+	_, err := r.run(ctx, "fetch")
+	return err
+}
+
 // Prefix is the path of Dir below the top of its repository ("" at the top,
 // "sub/" below it). It fails when Dir is not in a git repository.
 func (r Repo) Prefix(ctx context.Context) (string, error) {
@@ -30,9 +50,8 @@ func (r Repo) Prefix(ctx context.Context) (string, error) {
 
 // HasUpstream reports whether the current branch tracks a remote branch.
 func (r Repo) HasUpstream(ctx context.Context) (bool, error) {
-	_, err := r.Machine.Quiet().Run(ctx, "git", "-C", r.Dir, "rev-parse", "--abbrev-ref", "@{upstream}")
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
+	code, err := r.quietRun(ctx, "rev-parse", "--abbrev-ref", "@{upstream}")
+	if code > 0 {
 		return false, nil
 	}
 	return err == nil, err
@@ -151,7 +170,7 @@ func unmanagedChanges(dirty []string, prefix string, managed func(path string) b
 // upstream. Behind, a later push would be rejected; ahead, it would publish commits
 // the installer did not make.
 func (r Repo) RequireInSync(ctx context.Context) error {
-	if _, err := r.run(ctx, "fetch"); err != nil {
+	if err := r.fetch(ctx); err != nil {
 		return err
 	}
 	out, err := r.run(ctx, "rev-list", "--left-right", "--count", "HEAD...@{upstream}")
@@ -183,35 +202,38 @@ func (r Repo) Head(ctx context.Context) (string, error) {
 	return strings.TrimSpace(out), err
 }
 
-// Show returns the content of path (relative to Dir) at commit rev, and
-// whether the commit has that file.
-func (r Repo) Show(ctx context.Context, rev, path string) ([]byte, bool, error) {
-	listed, err := r.run(ctx, "ls-tree", "--name-only", rev, "--", path)
-	if err != nil || strings.TrimSpace(listed) == "" {
-		return nil, false, err
-	}
+// Show returns the content of path (relative to Dir) at commit rev. It fails
+// when the commit does not have that file: list it with Files first.
+func (r Repo) Show(ctx context.Context, rev, path string) ([]byte, error) {
 	out, err := r.run(ctx, "show", rev+":./"+path)
-	return []byte(out), err == nil, err
+	return []byte(out), err
 }
 
-// Files returns the files at commit rev in dir (relative to Dir), relative to Dir.
-func (r Repo) Files(ctx context.Context, rev, dir string) ([]string, error) {
-	out, err := r.run(ctx, "ls-tree", "--name-only", rev, "--", strings.TrimSuffix(dir, "/")+"/")
+// Files returns the files at commit rev that are, or are below, paths
+// (relative to Dir), relative to Dir. A path the commit does not have adds
+// nothing.
+func (r Repo) Files(ctx context.Context, rev string, paths ...string) ([]string, error) {
+	out, err := r.run(ctx, append([]string{"ls-tree", "-r", "-z", "--name-only", rev, "--"}, paths...)...)
 	if err != nil {
 		return nil, err
 	}
-	return strings.Fields(out), nil
+	var files []string
+	for f := range strings.SplitSeq(out, "\x00") {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files, nil
 }
 
 // OnUpstream fetches and reports whether commit rev is on the upstream of the
 // current branch.
 func (r Repo) OnUpstream(ctx context.Context, rev string) (bool, error) {
-	if _, err := r.run(ctx, "fetch"); err != nil {
+	if err := r.fetch(ctx); err != nil {
 		return false, err
 	}
-	_, err := r.Machine.Quiet().Run(ctx, "git", "-C", r.Dir, "merge-base", "--is-ancestor", rev, "@{upstream}")
-	var exit *exec.ExitError
-	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+	code, err := r.quietRun(ctx, "merge-base", "--is-ancestor", rev, "@{upstream}")
+	if code == 1 {
 		return false, nil
 	}
 	if err != nil {

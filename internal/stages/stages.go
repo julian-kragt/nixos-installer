@@ -14,9 +14,16 @@ import (
 	"installer/internal/secrets"
 )
 
-// stageBaseInstall is the ID of the stage after which the target's system must
-// not change any more.
-const stageBaseInstall = "0.2"
+// IDs of the stages that other stages refer to.
+const (
+	// stageBaseInstall is the stage after which the target's system must not
+	// change any more.
+	stageBaseInstall   = "0.2"
+	stageRecipients    = "2.2"
+	stageCommitPush    = "2.4"
+	stagePushedSecrets = "2.5"
+	stageFlakeInput    = "3.1"
+)
 
 // All is the pipeline: the stages in the order they run.
 var All = []pipeline.Stage{
@@ -27,13 +34,13 @@ var All = []pipeline.Stage{
 	{ID: "1.2", Name: "Host identity", Run: hostIdentity, Outdated: hostIdentityOutdated},
 	{ID: "1.3", Name: "User identity", Run: userIdentity, Outdated: userIdentityOutdated},
 	{ID: "2.1", Name: "Secrets repository", Run: secretsRepository},
-	{ID: "2.2", Name: "Recipients", Run: recipients},
+	{ID: stageRecipients, Name: "Recipients", Run: recipients, Outdated: recipientsOutdated},
 	{ID: "2.3", Name: "Template authoring", Run: templateAuthoring},
-	{ID: "2.4", Name: "Commit and push", Run: commitPush},
-	{ID: "3.1", Name: "Flake input", Run: flakeInput, Outdated: flakeInputOutdated},
+	{ID: stageCommitPush, Name: "Commit and push", Run: commitPush, Outdated: commitPushOutdated},
+	{ID: stagePushedSecrets, Name: "Pushed secrets", Run: pushedSecrets},
+	{ID: stageFlakeInput, Name: "Flake input", Run: flakeInput, Outdated: flakeInputOutdated},
 	{ID: "3.2", Name: "Rebuild", Run: rebuild},
 	{ID: "3.3", Name: "Cleanup", Run: cleanup},
-	{ID: "4.1", Name: "Pushed secrets", Run: pushedSecrets},
 }
 
 // configFlake is the config flake, evaluated on the provider.
@@ -75,15 +82,6 @@ func hostInfo(ctx context.Context, env *pipeline.Env) (nix.HostInfo, error) {
 // does not fit the nix-secrets layout.
 func hostUsers(ctx context.Context, env *pipeline.Env) ([]string, error) {
 	info, err := hostInfo(ctx, env)
-	if err != nil {
-		return nil, err
-	}
-	return usersOf(env.Host, info)
-}
-
-// hostUsersAt is hostUsers as the config at commit rev defines them.
-func hostUsersAt(ctx context.Context, env *pipeline.Env, rev string) ([]string, error) {
-	info, err := configFlake(env).At(rev).HostInfo(ctx, env.Host)
 	if err != nil {
 		return nil, err
 	}
