@@ -1,5 +1,6 @@
-// Package vim lets the operator write a file in vim on the provider. Vim keeps
-// no copy of its own, and the file is removed as soon as vim exits.
+// Package vim lets the operator write a file in vim, in the console helper on
+// the target. Vim keeps no copy of its own, and the file is removed as soon as
+// vim exits.
 package vim
 
 import (

@@ -6,15 +6,17 @@ import (
 	"strings"
 
 	"installer/internal/commands/luks"
+	"installer/internal/console"
 	"installer/internal/pipeline"
 	"installer/internal/runner"
 )
 
 // cleanup checks that the install left nothing on the target that unlocks its
 // disk or reaches GitHub: no LUKS passphrase file and no forwarded agent. A
-// passphrase file still there is removed. Earlier stages need no cleanup of
-// their own when they fail: the passphrase only ever lives in the ISO's RAM,
-// and sshd removes a forwarded agent when its session ends.
+// passphrase file still there is removed, and so is the console helper, which
+// holds nothing secret. Earlier stages need no cleanup of their own when they
+// fail: the passphrase only ever lives in the ISO's RAM, and sshd removes a
+// forwarded agent when its session ends.
 func cleanup(ctx context.Context, env *pipeline.Env) error {
 	return runner.Parallel(ctx,
 		runner.Step{Title: "Check LUKS passphrase", Fn: func(ctx context.Context) error {
@@ -23,6 +25,9 @@ func cleanup(ctx context.Context, env *pipeline.Env) error {
 				runner.Warn(ctx, "/tmp/disko-password was still on "+env.Host+"; removed it")
 			}
 			return err
+		}},
+		runner.Step{Title: "Remove console helper", Fn: func(ctx context.Context) error {
+			return console.Remove(ctx, env.Remote)
 		}},
 		runner.Step{Title: "Check forwarded agents", Fn: func(ctx context.Context) error {
 			sockets, err := env.Remote.ForwardedAgents(ctx)

@@ -19,7 +19,8 @@ const bootstrapModule = "nixos-bootstrap's bootstrap.nix"
 func readiness(ctx context.Context, env *pipeline.Env) error {
 	return runner.Parallel(ctx,
 		runner.Step{Title: "Check tools", Fn: func(ctx context.Context) error {
-			return checkTools(ctx, env.Remote, "age-keygen", "runuser", "git", "sops", "nix", "curl")
+			// sops, mkpasswd and vim are run by the console helper in 2.3.
+			return checkTools(ctx, env.Remote, "age-keygen", "runuser", "git", "sops", "mkpasswd", "vim", "systemd-run", "nix", "curl")
 		}},
 		runner.Step{Title: "Check nix features", Fn: func(ctx context.Context) error {
 			return checkNixFeatures(ctx, env.Remote, "nix-command", "flakes", "pipe-operators")

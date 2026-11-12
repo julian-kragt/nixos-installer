@@ -7,6 +7,7 @@ Checked against the repos on 2026-11-03.
 ## Decisions so far
 
 - **The Go installer replaces `install-host.sh` entirely.** The script and the `just install | enroll-sops | deploy-remote` recipes are removed from nixos-config, so until the installer is complete there is no other install path. The script stays the reference to port from: `git -C ../nixos-config show 06dd040:scripts/install-host.sh`. Line numbers in the prompts refer to that revision.
+- **Secrets are typed at the target's console only.** The LUKS passphrase (0.1) and the values of the secret files (2.3) are typed into the console helper on the target, so the provider only ever handles ciphertext (ROADMAP "Decisions", Where secrets are typed). The ISO's root password, which only lives in the ISO's RAM, is the exception.
 - **nix-secrets is a setup only and is not in use** (§3). The installer targets its layout, `hosts/<host>.yaml` and `host-users/<host>-<user>.yaml`, and does not need to support anything older. So that every file, rule and anchor names one host and user, the secrets stages refuse a user name with a dash, uppercase or a leading digit (`^[a-z_][a-z0-9_]*$`) and a host name with `_` (`secrets.CheckNames`).
 
 ---
@@ -57,14 +58,14 @@ The users on a host are the files `home/<u>/<host>.nix` (`usersForHost` in `conf
 | `enrollSops`, `pushSecrets`, `deployFullConfig`, `nixosAnywhereExtra`, `nixSecretsPath` | installer flags with defaults |
 | `provisionUserAgeKey` | dropped (obsolete, see §6.2) |
 
-The bootstrap system also sets systemd-boot and root SSH keys, includes git / sops / age / ssh-to-age / vim, enables the nix features an installer needs, and knows the github.com host key.
+The bootstrap system also sets systemd-boot and root SSH keys, includes git / sops / age / ssh-to-age / vim / mkpasswd, enables the nix features an installer needs, and knows the github.com host key.
 
 ### Other useful evaluations
 - Disks: `disks` in `installerData.<host>` (`nix.HostInfo.Disks`); a `REPLACE_ME` device fails the block device check in 0.1.
 - Users on a host: `users` in `installerData.<host>`.
 
 ### Disk / boot facts that affect the flow
-- Disko layout: GPT, 1G ESP, **LUKS** (`cryptroot`) → btrfs subvolumes `@root @home @nix @swap`. Passphrase file `/tmp/disko-password` must exist on the ISO before nixos-anywhere runs.
+- Disko layout: GPT, 1G ESP, **LUKS** (`cryptroot`) → btrfs subvolumes `@root @home @nix @swap`. Passphrase file `/tmp/disko-password` must exist on the ISO before nixos-anywhere runs; the console helper writes it there from what the operator types at the console.
 - No initrd SSH unlock → after reboot (Stage 0.2) someone must type the LUKS passphrase at the console before SSH comes up. The SSH wait timeout covers this.
 - Before install the target is a NixOS ISO; legacy flow asks the operator to run `sudo passwd` so root SSH works.
 
@@ -115,6 +116,8 @@ What the old setup got wrong, which the installer must not reintroduce:
 cmd/nixos-installer/     main.go    signals, log file, runner, wiring
                          flags.go   --target --host --config --secrets --ssh-password --reinstall --generate-hardware --verbose
                          inputs.go  asks for what the flags left empty, loads the host's state
+cmd/nixos-installer-console/        the console helper: runs on the target, on tty9, and asks the operator there
+                                    for the LUKS passphrase or the secret files' values
 internal/runner/         live task tree, log file, questions to the operator; see docs/RUNNER.md
 internal/pipeline/       the engine every stage runs in
                          pipeline.go        Inputs, Env, Stage, Run (resume loop)
@@ -127,15 +130,17 @@ internal/machine/        running commands on a machine, and trusting and logging
 internal/commands/       the commands the stages run, one package each
                          nix/           Config: nix eval of <config>#installerData, hosts, the bootstrap system
                          git/           Repo: prefix, upstream, dirty and deleted paths, commit, RequireCommitted
-                         luks/          the LUKS passphrase on the target, and its removal
+                         luks/          the LUKS passphrase, typed at the target's console, and its removal
                          nixosanywhere/ run nixos-anywhere, tell what a target runs
                          nixosrebuild/  nixos-rebuild switch on the target, waiting out a dropped connection
                          systemd/       failed units on a machine
                          hostidentity/  the age keys of the host and of its users, created on the target
-                         sops/          encrypt on the provider; check on the target that a file decrypts
+                         sops/          encrypt (in the console helper); check on the target that a file decrypts
                          mkpasswd/      the crypt hash of a login password
-                         vim/           write a file in vim on the provider, leaving no copy behind
+                         vim/           write a file in vim, leaving no copy behind (in the console helper)
 internal/secrets/        the nix-secrets repo: file layout, .sops.yaml editor, templates, secret-file checks
+internal/console/        the console helper on the target: find or build it, install it, run it on tty9 with systemd-run
+internal/authoring/      write a secret file from its template (vim, passwords, mkpasswd, sops); runs in the helper
 internal/stages/         one file per stage, which orchestrates; nothing else
                          stages.go    All: the ordered stage list
                          <id>_<name>.go, named by stage ID: 0_0_environment_preparation.go
@@ -174,18 +179,18 @@ Legacy = `install-host.sh` at `06dd040` in nixos-config.
 | Pipeline stage | Runs on | Legacy `install-host.sh` equivalent | Port notes |
 |---|---|---|---|
 | 0.0 Environment preparation | provider (+target) | arg parsing, tool checks | Built. Always runs (not recorded in `State.Completed`). Checks local tools, internet, target reachable on :22, SSH access (installs the provider's keys with the root password while 0.2 is not in `Completed` and the target offers password login; the installed system takes keys only), config flake. |
-| 0.1 Provider preparation | provider (+target checks) | preflight: disk not `REPLACE_ME`, ping, `ssh root@ip`, remote `nix`/`lsblk`/internet check, `test -b $DEVICE`, show `lsblk`, type "install", LUKS prompt → `/tmp/disko-password` | Built. The disks are those in `installerData.<host>.disks`, each of which must be a block device on the target. Also checks the config repo (no uncommitted changes, level with its upstream), generates a missing hardware config from the target once the operator confirms the path (`--generate-hardware` skips the question), and checks the bootstrap keys and system, and the target. Shows the disks, takes a typed confirmation, streams the LUKS passphrase via stdin. |
+| 0.1 Provider preparation | provider (+target checks) | preflight: disk not `REPLACE_ME`, ping, `ssh root@ip`, remote `nix`/`lsblk`/internet check, `test -b $DEVICE`, show `lsblk`, type "install", LUKS prompt → `/tmp/disko-password` | Built. The disks are those in `installerData.<host>.disks`, each of which must be a block device on the target. Also checks the config repo (no uncommitted changes, level with its upstream), generates a missing hardware config from the target once the operator confirms the path (`--generate-hardware` skips the question), and checks the bootstrap keys and system, and the target. Shows the disks, takes a typed confirmation, then installs the console helper and has the operator type the LUKS passphrase at the target's console (tty9). |
 | 0.2 Base install | provider → target | `nix run github:nix-community/nixos-anywhere -- [--generate-hardware-config …] --build-on-remote --flake <config>#<host>-bootstrap --target-host root@ip`; commit hardware config; skip if `/run/current-system` exists (a check that never worked) | Built. Only from the ISO: its `VARIANT_ID=installer` makes nixos-anywhere (pinned at 1.13.0) skip kexec, so `/tmp/disko-password` from 0.1 survives and `--disk-encryption-keys` is not needed. Any other system that is not the host is refused. Then wait for SSH (up to 15 minutes, poll 5s), accept only a key that differs from the ISO's, pin it. Finally commit the hardware config and push it; a re-run retries a failed push without reinstalling. |
 | 1.1 Readiness | target | partial (internet ping) | Add `git ls-remote`-style GitHub reachability + `git sops vim nix` presence. |
 | 1.2 Host identity | target | `cat /etc/ssh/ssh_host_ed25519_key.pub \| ssh-to-age` (run on provider) | Replaced: generates a standalone age key on the target unless it exists (`internal/commands/hostidentity`); the recipient is stored in state. |
 | 1.3 User identity | target | — (copied the operator key to the target) | New: a standalone age key per user on the host, created on the target. |
 | 2.1 Secrets repository | provider | used local `../nix-secrets` | The `--secrets` clone: committed apart from the host's own files, level with its upstream. |
 | 2.2 Recipients / .sops.yaml | provider | python insert of `&host_<h>` + append rule; conflict check when anchor exists with another key | Structural YAML edit in-process, idempotent, also host-users rules. Changes nothing and fails while a rule comes before a secret file's own rule and matches it too (`Config.Shadowed`, every `hosts/*`/`host-users/*` in the clone); the operator fixes the order by hand. A new rule goes last. |
-| 2.3 Template authoring | provider (+target checks) | `cp templates/host.yaml` + `sops --encrypt --in-place` | The operator writes the file in vim (no swap, backup, undo or viminfo; temp file removed on exit) and types its passwords; `sops` on the provider encrypts it to the target's public keys; the target checks that each value decrypts, per path with `--extract`. No `updatekeys`: the provider cannot decrypt. |
+| 2.3 Template authoring | target console (+provider checks) | `cp templates/host.yaml` + `sops --encrypt --in-place` | The provider checks each file on the target; for those that are not fine it copies `.sops.yaml` and the templates to `/run/nixos-installer/repo` on the target and starts the console helper there. At the console the operator writes each file in vim (no swap, backup, undo or viminfo; temp file on tmpfs, removed on exit) and types its passwords; `mkpasswd` and `sops` on the target hash them and encrypt the file to the public keys. The provider reads back only the ciphertext, checks it is all `ENC[…]`, puts it in the clone and has the target check that each value decrypts, per path with `--extract`. No `updatekeys`: the provider cannot decrypt. |
 | 2.4 Commit/push | provider | `sops updatekeys -y hosts/<h>.yaml host-users/<h>-<u>.yaml`, `git add -A; commit; push` | Commit only the listed paths (not `-A`). Verify `sops:` metadata in every secret file. Persist SHA. |
 | 3.1 Flake input | provider | `nix flake update nix-secrets` + commit `flake.lock` (in config, on provider) | See §6.4. |
 | 3.2 Rebuild | target | `nixos-rebuild --flake .#<h> --target-host root@ip --build-host root@ip switch` (from provider) | Replaced: `nixos-rebuild switch --flake git+ssh://…?rev=<ConfigRev>#<h>` on the target with agent forwarding (`internal/commands/nixosrebuild`); legacy Phase 9's validation without the user-age-key checks. |
-| 3.3 Cleanup | target | `trap rm KNOWN_HOSTS` only | Built. Removes a `/tmp/disko-password` still on the installed system, with a warning (`luks.Remove`), and fails while a forwarded agent still answers on the target (`Machine.ForwardedAgents`: `/root/.ssh/agent/*` since OpenSSH 10.1, `/tmp/ssh-*/agent.*` before; sockets nobody listens on are removed). Nothing to revoke: no deploy key exists. |
+| 3.3 Cleanup | target | `trap rm KNOWN_HOSTS` only | Built. Removes a `/tmp/disko-password` still on the installed system, with a warning (`luks.Remove`), and the console helper's `/run/nixos-installer` (`console.Remove`), and fails while a forwarded agent still answers on the target (`Machine.ForwardedAgents`: `/root/.ssh/agent/*` since OpenSSH 10.1, `/tmp/ssh-*/agent.*` before; sockets nobody listens on are removed). Nothing to revoke: no deploy key exists. |
 | 4.1 Pushed secrets | provider | — | New: checks the host's secrets as pushed, at `SecretsCommit` read with git: the commit is on the remote; for the users of the config at `ConfigRev`, each file exists, has only `ENC[…]` values and is encrypted to its own rule's recipients, which sops uses first; no file of a removed user is left. No decryption. Reports every problem, then fails. |
 | 4.2 Recovery | — | `--enroll-sops`, `--deploy-remote` modes | Becomes "resume from persisted state". |
 
@@ -217,4 +222,4 @@ The numbers are the ones the roadmap and the stage prompts refer to. The roadmap
 - **Host key**: `machine.HostPin` keeps one key per host in `<state dir>/<host>.known_hosts`, and `machine.SSH` and `InstallAuthorizedKeys` accept only that key. nixos-anywhere cannot be given the pin (ROADMAP "Plumbing design", Host key). Stage 3.2 runs `nixos-rebuild` on the target, so it needs no ssh options from here, and checks the pin again after the switch.
 - **Tool helpers**: `internal/commands/nix`, `internal/commands/git`, `internal/commands/luks`, `internal/commands/nixosanywhere`, `internal/commands/hostidentity`, `internal/commands/sops`, `internal/commands/nixosrebuild` and `internal/commands/systemd` exist, each in its own package (§4). `.sops.yaml` editing is in-process.
 - **CLI** (`cmd/nixos-installer/flags.go`, `inputs.go`): `--target` (prompted when empty; IPv4, IPv6, or link-local IPv6 with zone such as `fe80::1%eth0`), `--host` (picked from the config's `bootstrapEntries` output when empty), `--config` (prompted when empty), `--secrets` (the nix-secrets clone; prompted when empty, must hold a `.sops.yaml`), `--ssh-password` (the ISO's root password for the first key install; prompted when key auth fails, it is empty and the target offers password login), `--reinstall` (deletes the chosen host's `<host>.json` and `<host>.known_hosts` before the state is loaded, so all stages run again; the target must be booted from the ISO to be installed again), `--generate-hardware` (generates a missing hardware config from the target in 0.1 without asking), `--verbose`. Planned: `install --host --target` (full) and `secrets --host --target` (Phase 2–3 resume, as in Pipeline 4.2, by filtering `stages.All`).
-- **Secrets hygiene**: never put secrets in argv or logs (the bash script followed this — keep it), always `umask 077` on target. No cleanup runs when a stage fails, because nothing secret is left to clean: `/tmp/disko-password` lives only in the ISO's RAM, from 0.1 until 0.2 reboots into the installed system, and a retry of 0.2 needs it; sshd removes a forwarded agent when its session ends, Ctrl+C and a dropped connection included; the sops check on the target holds ciphertext only, in a temp file its `trap` removes. 3.3 checks the end state once, on the installed system.
+- **Secrets hygiene**: plaintext secrets are typed at the target's console, into the console helper, never into the installer on the provider; never put secrets in argv or logs (the bash script followed this — keep it), always `umask 077` on target. The helper's plaintext lives in its memory and, while vim is open, in a file on `/run` (tmpfs); the provider reads back ciphertext only. No cleanup runs when a stage fails, because nothing secret is left to clean: `/tmp/disko-password` lives only in the ISO's RAM, from 0.1 until 0.2 reboots into the installed system, and a retry of 0.2 needs it; sshd removes a forwarded agent when its session ends, Ctrl+C and a dropped connection included; the sops check on the target holds ciphertext only, in a temp file its `trap` removes. 3.3 checks the end state once, on the installed system.

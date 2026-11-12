@@ -1,4 +1,4 @@
-// Package sops runs sops. The provider encrypts, to public keys only; the
+// Package sops runs sops. The console helper encrypts, to public keys only; the
 // target, which holds the host's key, checks that a file decrypts and reports
 // what its values look like, never the values.
 package sops
