@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 var loopback = Loopback()
@@ -112,7 +112,7 @@ func TestRunStopsWhenCancelled(t *testing.T) {
 }
 
 func TestSSHArgv(t *testing.T) {
-	for _, addr := range []string{"192.168.1.100", "2001:db8::5", "fe80::1%eth0"} {
+	for _, addr := range []string{"192.0.2.10", "2001:db8::5", "fe80::1%eth0"} {
 		argv := SSH(addr, HostPin{Host: "h", File: "/state/h.known_hosts"}).ssh
 		if argv[0] != "ssh" || !slices.Equal(argv[len(argv)-3:], []string{"-l", "root", addr}) {
 			t.Errorf("%s: argv = %q", addr, argv)
@@ -127,7 +127,7 @@ func TestSSHArgv(t *testing.T) {
 }
 
 func TestAgentIsForwardedOnlyWithAgent(t *testing.T) {
-	plain := SSH("192.168.1.100", HostPin{Host: "h", File: "/state/h.known_hosts"})
+	plain := SSH("192.0.2.10", HostPin{Host: "h", File: "/state/h.known_hosts"})
 	forwarded := plain.WithAgent()
 	if !slices.Contains(plain.ssh, "ForwardAgent=no") || slices.Contains(plain.ssh, "ForwardAgent=yes") {
 		t.Errorf("plain argv = %q, want the agent off", plain.ssh)

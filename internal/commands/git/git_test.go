@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
 )
 
 // TestMain gives git an identity, so commits work without the developer's

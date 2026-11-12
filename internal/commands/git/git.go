@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
 )
 
 // Repo is the git repository around Dir on Machine.

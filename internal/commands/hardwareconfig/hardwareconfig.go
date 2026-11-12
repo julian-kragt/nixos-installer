@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"installer/internal/commands/git"
-	"installer/internal/machine"
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/commands/git"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // commandNotFound is the exit code of a shell that cannot find a command.

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io"
 
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 const instructions = `Prepare the target machine first (it needs no operating system):

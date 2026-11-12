@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
 )
 
 // fakeNix puts a `nix` on PATH that prints a warning on stderr and body on
@@ -62,11 +62,11 @@ func TestEvalJSONRejectsGarbage(t *testing.T) {
 
 func TestHardwareConfigPath(t *testing.T) {
 	args := fakeNix(t, `"hosts/a/hw.nix"`)
-	got, err := cfg.HardwareConfigPath(context.Background(), "atlas")
+	got, err := cfg.HardwareConfigPath(context.Background(), "myhost")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := evalArgs("bootstrapEntries.atlas.hardwareConfigPath"); !slices.Equal(args(), want) {
+	if want := evalArgs("bootstrapEntries.myhost.hardwareConfigPath"); !slices.Equal(args(), want) {
 		t.Errorf("args = %q, want %q", args(), want)
 	}
 	if got != "hosts/a/hw.nix" {
@@ -77,11 +77,11 @@ func TestHardwareConfigPath(t *testing.T) {
 func TestHostInfo(t *testing.T) {
 	args := fakeNix(t, `{"hardwareConfigPath":"hosts/a/hw.nix","rootAuthorizedKeys":["ssh-ed25519 AAAA me"],"system":"x86_64-linux","disks":{"main":"/dev/vda"},`+
 		`"users":{"auto":{"home":"/home/auto","uid":null},"fixed":{"home":"/data/fixed","uid":1500}}}`)
-	got, err := cfg.HostInfo(context.Background(), "atlas")
+	got, err := cfg.HostInfo(context.Background(), "myhost")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := evalArgs("installerData.atlas"); !slices.Equal(args(), want) {
+	if want := evalArgs("installerData.myhost"); !slices.Equal(args(), want) {
 		t.Errorf("args = %q, want %q", args(), want)
 	}
 	if got.System != "x86_64-linux" || got.HardwareConfigPath != "hosts/a/hw.nix" || len(got.RootAuthorizedKeys) != 1 || got.Disks["main"] != "/dev/vda" {
@@ -96,9 +96,9 @@ func TestHostInfo(t *testing.T) {
 }
 
 func TestHosts(t *testing.T) {
-	args := fakeNix(t, `["atlas","broadway"]`)
+	args := fakeNix(t, `["myhost","nexthost"]`)
 	got, err := cfg.Hosts(context.Background())
-	if err != nil || !slices.Equal(got, []string{"atlas", "broadway"}) {
+	if err != nil || !slices.Equal(got, []string{"myhost", "nexthost"}) {
 		t.Fatalf("got %q, %v", got, err)
 	}
 	if want := evalArgs("installerData", "--apply", "builtins.attrNames"); !slices.Equal(args(), want) {
@@ -108,10 +108,10 @@ func TestHosts(t *testing.T) {
 
 func TestCheckBootstrapSystem(t *testing.T) {
 	args := fakeNix(t, `"/nix/store/x.drv"`)
-	if err := cfg.CheckBootstrapSystem(context.Background(), "atlas"); err != nil {
+	if err := cfg.CheckBootstrapSystem(context.Background(), "myhost"); err != nil {
 		t.Fatal(err)
 	}
-	if want := evalArgs("nixosConfigurations.atlas-bootstrap.config.system.build.toplevel.drvPath"); !slices.Equal(args(), want) {
+	if want := evalArgs("nixosConfigurations.myhost-bootstrap.config.system.build.toplevel.drvPath"); !slices.Equal(args(), want) {
 		t.Errorf("args = %q, want %q", args(), want)
 	}
 }
@@ -214,23 +214,23 @@ func TestEvalAtRev(t *testing.T) {
 }
 
 func TestPasswordUsers(t *testing.T) {
-	args := fakeNix(t, `["passwords/zoe","passwords/jkragt","wifi","passwords/","passwords/a/b"]`)
-	got, err := cfg.PasswordUsers(context.Background(), "atlas")
-	if err != nil || !slices.Equal(got, []string{"jkragt", "zoe"}) {
+	args := fakeNix(t, `["passwords/zoe","passwords/jdoe","wifi","passwords/","passwords/a/b"]`)
+	got, err := cfg.PasswordUsers(context.Background(), "myhost")
+	if err != nil || !slices.Equal(got, []string{"jdoe", "zoe"}) {
 		t.Fatalf("got %q, %v", got, err)
 	}
-	if want := evalArgs("nixosConfigurations.atlas.config.sops.secrets", "--apply", "builtins.attrNames"); !slices.Equal(args(), want) {
+	if want := evalArgs("nixosConfigurations.myhost.config.sops.secrets", "--apply", "builtins.attrNames"); !slices.Equal(args(), want) {
 		t.Errorf("args = %q, want %q", args(), want)
 	}
 }
 
 func TestToplevel(t *testing.T) {
-	args := fakeNix(t, `"/nix/store/abc-nixos-system-atlas"`)
-	got, err := cfg.Toplevel(context.Background(), "atlas")
-	if err != nil || got != "/nix/store/abc-nixos-system-atlas" {
+	args := fakeNix(t, `"/nix/store/abc-nixos-system-myhost"`)
+	got, err := cfg.Toplevel(context.Background(), "myhost")
+	if err != nil || got != "/nix/store/abc-nixos-system-myhost" {
 		t.Fatalf("got %q, %v", got, err)
 	}
-	if want := evalArgs("nixosConfigurations.atlas.config.system.build.toplevel.outPath"); !slices.Equal(args(), want) {
+	if want := evalArgs("nixosConfigurations.myhost.config.system.build.toplevel.outPath"); !slices.Equal(args(), want) {
 		t.Errorf("args = %q, want %q", args(), want)
 	}
 }

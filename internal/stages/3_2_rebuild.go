@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"installer/internal/commands/nixosrebuild"
-	"installer/internal/commands/systemd"
-	"installer/internal/machine"
-	"installer/internal/pipeline"
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/commands/nixosrebuild"
+	"github.com/julian-kragt/nixos-installer/internal/commands/systemd"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // switchReconnectTimeout is how long the target may take to answer again when

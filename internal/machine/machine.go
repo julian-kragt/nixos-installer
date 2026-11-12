@@ -12,7 +12,7 @@ import (
 	"slices"
 	"strings"
 
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // Machine runs commands on a machine: this one (Local) or another one over ssh

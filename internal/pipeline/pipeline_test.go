@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // fake is a stage that records that it ran.
@@ -138,12 +138,12 @@ func TestSaveFailureFailsTheStage(t *testing.T) {
 
 func TestNewEnvPinsNextToTheState(t *testing.T) {
 	dir := t.TempDir()
-	st, err := LoadState(dir, "atlas")
+	st, err := LoadState(dir, "myhost")
 	if err != nil {
 		t.Fatal(err)
 	}
 	env := NewEnv(Inputs{Target: "192.0.2.1"}, st)
-	if env.Pin.File != filepath.Join(dir, "atlas.known_hosts") || env.Pin.Host != "atlas" {
+	if env.Pin.File != filepath.Join(dir, "myhost.known_hosts") || env.Pin.Host != "myhost" {
 		t.Errorf("pin = %+v", env.Pin)
 	}
 }

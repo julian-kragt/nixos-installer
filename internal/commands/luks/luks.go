@@ -11,9 +11,9 @@ import (
 	"os/exec"
 	"strings"
 
-	"installer/internal/console"
-	"installer/internal/machine"
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/console"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // passwordPath is where the passphrase lives on the target. A variable so tests

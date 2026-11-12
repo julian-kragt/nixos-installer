@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"installer/internal/machine"
-	"installer/internal/secrets"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/secrets"
 )
 
 const (
@@ -46,7 +46,7 @@ func newKey(t *testing.T, dir string) (string, string) {
 }
 
 // newRepo creates a nix-secrets repository whose .sops.yaml, written by the
-// editor, encrypts atlas' files to recipient.
+// editor, encrypts myhost' files to recipient.
 func newRepo(t *testing.T, recipient string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -54,7 +54,7 @@ func newRepo(t *testing.T, recipient string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Apply(secrets.Host{Name: "atlas", Recipient: recipient, Users: map[string]string{"jkragt": recipient}})
+	cfg.Apply(secrets.Host{Name: "myhost", Recipient: recipient, Users: map[string]string{"jdoe": recipient}})
 	data, err := cfg.Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func TestEncryptThenFieldsOnTheTarget(t *testing.T) {
 	needTools(t)
 	keyFile, recipient := newKey(t, t.TempDir())
 	dir := newRepo(t, recipient)
-	file := secrets.UserFile("atlas", "jkragt")
+	file := secrets.UserFile("myhost", "jdoe")
 	doc := []byte("hashedPassword: '" + hash + "'\nnote: " + secret + "\nleft: change_me\n" +
 		"db:\n  key: |\n    -----BEGIN KEY-----\n    " + secret + "\n  servers:\n    - a\n    - b\n  pending:\n    - change_me\n")
 
@@ -115,7 +115,7 @@ func TestFieldsWithAnotherKey(t *testing.T) {
 	_, recipient := newKey(t, t.TempDir())
 	otherKey, _ := newKey(t, t.TempDir())
 	dir := newRepo(t, recipient)
-	file := secrets.HostFile("atlas")
+	file := secrets.HostFile("myhost")
 	if err := (Repo{machine.Local(), dir}).Encrypt(context.Background(), file, []byte("placeholder: unused\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestFieldsWithoutTheKeyFile(t *testing.T) {
 	needTools(t)
 	_, recipient := newKey(t, t.TempDir())
 	dir := newRepo(t, recipient)
-	file := secrets.HostFile("atlas")
+	file := secrets.HostFile("myhost")
 	if err := (Repo{machine.Local(), dir}).Encrypt(context.Background(), file, []byte("placeholder: unused\n")); err != nil {
 		t.Fatal(err)
 	}

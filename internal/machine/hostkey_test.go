@@ -89,7 +89,7 @@ func openServer(signer ssh.Signer) *ssh.ServerConfig {
 }
 
 func TestHostPinLoadAndSave(t *testing.T) {
-	pin := NewHostPin(filepath.Join(t.TempDir(), "new"), "atlas")
+	pin := NewHostPin(filepath.Join(t.TempDir(), "new"), "myhost")
 	if key, err := pin.Load(); err != nil || key != nil {
 		t.Fatalf("nothing pinned: key = %v, err = %v", key, err)
 	}
@@ -109,7 +109,7 @@ func TestHostPinLoadAndSave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lines := strings.Count(string(data), "\n"); lines != 1 || !strings.HasPrefix(string(data), "atlas ssh-ed25519 ") {
+	if lines := strings.Count(string(data), "\n"); lines != 1 || !strings.HasPrefix(string(data), "myhost ssh-ed25519 ") {
 		t.Errorf("known_hosts = %q, want one line filed under the host name", data)
 	}
 	if fi, _ := os.Stat(pin.File); fi.Mode().Perm() != 0o600 {
@@ -148,7 +148,7 @@ func sshTo(t *testing.T, addr string, pin HostPin) Machine {
 func TestSSHChecksThePin(t *testing.T) {
 	signer := newSigner(t)
 	addr := startSSHServer(t, openServer(signer), nil)
-	pin := NewHostPin(filepath.Join(t.TempDir(), "with space"), "atlas")
+	pin := NewHostPin(filepath.Join(t.TempDir(), "with space"), "myhost")
 
 	if err := pin.Save(signer.PublicKey()); err != nil {
 		t.Fatal(err)
@@ -179,7 +179,7 @@ func TestInstallAuthorizedKeysChecksThePinBeforeThePassword(t *testing.T) {
 	received := make(chan string, 1)
 	addr := startSSHServer(t, cfg, received)
 	ctx := context.Background()
-	pin := NewHostPin(t.TempDir(), "atlas")
+	pin := NewHostPin(t.TempDir(), "myhost")
 
 	if err := installAuthorizedKeys(ctx, addr, "pw", "ssh-ed25519 AAAA\n", pin); err == nil {
 		t.Error("nothing pinned: want an error")
@@ -225,7 +225,7 @@ func TestInstallAuthorizedKeysAsksForThePinnedKeyType(t *testing.T) {
 	cfg.AddHostKey(signer)
 	received := make(chan string, 1)
 	addr := startSSHServer(t, cfg, received)
-	pin := NewHostPin(t.TempDir(), "atlas")
+	pin := NewHostPin(t.TempDir(), "myhost")
 	if err := pin.Save(signer.PublicKey()); err != nil {
 		t.Fatal(err)
 	}

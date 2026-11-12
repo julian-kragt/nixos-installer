@@ -6,14 +6,6 @@ import (
 	"testing"
 )
 
-func keyPaths(t *Template) []string {
-	var out []string
-	for _, k := range t.Keys {
-		out = append(out, k.Path.String())
-	}
-	return out
-}
-
 func TestParseTemplate(t *testing.T) {
 	tmpl, err := ParseTemplate([]byte(`# guidance
 hashedPassword: CHANGEME
@@ -103,11 +95,11 @@ func TestBufferAndDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	buf, err := tmpl.Buffer("host-users/atlas-jkragt.yaml")
+	buf, err := tmpl.Buffer("host-users/myhost-jdoe.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(buf), "hashedPassword") || !strings.Contains(string(buf), "host-users/atlas-jkragt.yaml") {
+	if strings.Contains(string(buf), "hashedPassword") || !strings.Contains(string(buf), "host-users/myhost-jdoe.yaml") {
 		t.Errorf("buffer:\n%s", buf)
 	}
 

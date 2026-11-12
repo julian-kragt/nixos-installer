@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"installer/internal/pipeline"
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // operator returns a context whose runner reads the operator's answers from
@@ -123,24 +123,24 @@ func TestListHostsWithoutNix(t *testing.T) {
 }
 
 func TestListAndPickHost(t *testing.T) {
-	dir := newConfig(t, "atlas", "broadway")
+	dir := newConfig(t, "myhost", "nexthost")
 	ctx, _ := operator("2\n")
 	hosts, err := listHosts(ctx, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(hosts, []string{"atlas", "broadway"}) {
+	if !reflect.DeepEqual(hosts, []string{"myhost", "nexthost"}) {
 		t.Fatalf("got %v", hosts)
 	}
 
-	if got, err := pickHost(ctx, hosts, ""); err != nil || got != "broadway" {
+	if got, err := pickHost(ctx, hosts, ""); err != nil || got != "nexthost" {
 		t.Fatalf("pick: %q %v", got, err)
 	}
 	none, out := operator("")
-	if got, err := pickHost(none, hosts, "atlas"); err != nil || got != "atlas" {
+	if got, err := pickHost(none, hosts, "myhost"); err != nil || got != "myhost" {
 		t.Fatalf("want: %q %v", got, err)
 	}
-	if got, err := pickHost(none, hosts[:1], ""); err != nil || got != "atlas" || out.Len() != 0 {
+	if got, err := pickHost(none, hosts[:1], ""); err != nil || got != "myhost" || out.Len() != 0 {
 		t.Fatalf("a lone host is taken without asking: %q %v, printed %q", got, err, out.String())
 	}
 	if _, err := pickHost(none, hosts, "x"); err == nil {
@@ -158,7 +158,7 @@ func TestListHostsWithoutHosts(t *testing.T) {
 
 func TestResolveInputsCompletesInputsAndLoadsState(t *testing.T) {
 	stateDir := t.TempDir()
-	saved, err := pipeline.LoadState(stateDir, "broadway")
+	saved, err := pipeline.LoadState(stateDir, "nexthost")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,8 +168,8 @@ func TestResolveInputsCompletesInputsAndLoadsState(t *testing.T) {
 	}
 
 	secretsDir := newSecrets(t)
-	ctx, out := operator(secretsDir + "\n2\n192.168.1.100\n") // secrets, host, target
-	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas", "broadway")}
+	ctx, out := operator(secretsDir + "\n2\n192.0.2.10\n") // secrets, host, target
+	in := pipeline.Inputs{ConfigDir: newConfig(t, "myhost", "nexthost")}
 	st, err := resolveInputs(ctx, &in, stateDir)
 	if err != nil {
 		t.Fatal(err)
@@ -177,21 +177,21 @@ func TestResolveInputsCompletesInputsAndLoadsState(t *testing.T) {
 	if strings.Contains(out.String(), "Prepare the target") {
 		t.Errorf("instructions shown to an installed host:\n%s", out.String())
 	}
-	if in.Target != "192.168.1.100" || in.Host != "broadway" || in.SecretsDir != secretsDir {
+	if in.Target != "192.0.2.10" || in.Host != "nexthost" || in.SecretsDir != secretsDir {
 		t.Errorf("inputs: %+v", in)
 	}
-	if st.Host != "broadway" || len(st.Completed) != 2 {
+	if st.Host != "nexthost" || len(st.Completed) != 2 {
 		t.Errorf("state: %+v", st)
 	}
 }
 
 func TestResolveInputsShowsInstructionsToANewHost(t *testing.T) {
-	ctx, out := operator("\n192.168.1.100\n") // Enter, target
-	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas"), SecretsDir: newSecrets(t)}
+	ctx, out := operator("\n192.0.2.10\n") // Enter, target
+	in := pipeline.Inputs{ConfigDir: newConfig(t, "myhost"), SecretsDir: newSecrets(t)}
 	if _, err := resolveInputs(ctx, &in, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
-	if in.Target != "192.168.1.100" {
+	if in.Target != "192.0.2.10" {
 		t.Errorf("target = %q", in.Target)
 	}
 	if !strings.Contains(out.String(), "Prepare the target") {
@@ -203,7 +203,7 @@ func TestResolveInputsShowsInstructionsToANewHost(t *testing.T) {
 // root password set again: the instructions show until 0.2 is done.
 func TestResolveInputsShowsInstructionsUntilTheBaseInstall(t *testing.T) {
 	stateDir := t.TempDir()
-	saved, err := pipeline.LoadState(stateDir, "atlas")
+	saved, err := pipeline.LoadState(stateDir, "myhost")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestResolveInputsShowsInstructionsUntilTheBaseInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, out := operator("\n")
-	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas"), SecretsDir: newSecrets(t), Host: "atlas", Target: "192.168.1.100"}
+	in := pipeline.Inputs{ConfigDir: newConfig(t, "myhost"), SecretsDir: newSecrets(t), Host: "myhost", Target: "192.0.2.10"}
 	if _, err := resolveInputs(ctx, &in, stateDir); err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestResolveInputsShowsInstructionsUntilTheBaseInstall(t *testing.T) {
 // A reinstall whose inputs are not complete deletes nothing.
 func TestResolveInputsReinstallKeepsTheStateWhenAborted(t *testing.T) {
 	stateDir := t.TempDir()
-	saved, err := pipeline.LoadState(stateDir, "atlas")
+	saved, err := pipeline.LoadState(stateDir, "myhost")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestResolveInputsReinstallKeepsTheStateWhenAborted(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, _ := operator("") // no operator to give the target
-	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas"), SecretsDir: newSecrets(t), Host: "atlas", Reinstall: true}
+	in := pipeline.Inputs{ConfigDir: newConfig(t, "myhost"), SecretsDir: newSecrets(t), Host: "myhost", Reinstall: true}
 	if _, err := resolveInputs(ctx, &in, stateDir); err == nil || !strings.Contains(err.Error(), "--target is required") {
 		t.Fatalf("err = %v, want the missing target", err)
 	}
@@ -244,12 +244,12 @@ func TestResolveInputsReinstallKeepsTheStateWhenAborted(t *testing.T) {
 
 func TestResolveInputsFromFlagsAsksNothing(t *testing.T) {
 	ctx, _ := operator("")
-	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas"), SecretsDir: newSecrets(t), Host: "atlas", Target: "192.168.1.100"}
+	in := pipeline.Inputs{ConfigDir: newConfig(t, "myhost"), SecretsDir: newSecrets(t), Host: "myhost", Target: "192.0.2.10"}
 	st, err := resolveInputs(ctx, &in, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Host != "atlas" || len(st.Completed) != 0 {
+	if st.Host != "myhost" || len(st.Completed) != 0 {
 		t.Errorf("state: %+v", st)
 	}
 }
@@ -259,7 +259,7 @@ func TestResolveInputsFromFlagsAsksNothing(t *testing.T) {
 // confirmed.
 func TestResolveInputsReinstallStartsOver(t *testing.T) {
 	stateDir := t.TempDir()
-	saved, err := pipeline.LoadState(stateDir, "atlas")
+	saved, err := pipeline.LoadState(stateDir, "myhost")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestResolveInputsReinstallStartsOver(t *testing.T) {
 	if err := saved.Save(); err != nil {
 		t.Fatal(err)
 	}
-	pin := filepath.Join(stateDir, "atlas.known_hosts")
+	pin := filepath.Join(stateDir, "myhost.known_hosts")
 	leftover := pin + ".reinstall"
 	for _, f := range []string{pin, leftover} {
 		if err := os.WriteFile(f, nil, 0o600); err != nil {
@@ -276,7 +276,7 @@ func TestResolveInputsReinstallStartsOver(t *testing.T) {
 	}
 
 	ctx, _ := operator("\n") // Enter after the instructions
-	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas"), SecretsDir: newSecrets(t), Host: "atlas", Target: "192.168.1.100", Reinstall: true}
+	in := pipeline.Inputs{ConfigDir: newConfig(t, "myhost"), SecretsDir: newSecrets(t), Host: "myhost", Target: "192.0.2.10", Reinstall: true}
 	st, err := resolveInputs(ctx, &in, stateDir)
 	if err != nil {
 		t.Fatal(err)

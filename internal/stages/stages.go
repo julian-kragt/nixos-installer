@@ -8,10 +8,10 @@ import (
 	"maps"
 	"slices"
 
-	"installer/internal/commands/git"
-	"installer/internal/commands/nix"
-	"installer/internal/pipeline"
-	"installer/internal/secrets"
+	"github.com/julian-kragt/nixos-installer/internal/commands/git"
+	"github.com/julian-kragt/nixos-installer/internal/commands/nix"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/secrets"
 )
 
 // IDs of the stages that other stages refer to.

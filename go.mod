@@ -1,4 +1,4 @@
-module installer
+module github.com/julian-kragt/nixos-installer
 
 go 1.27
 

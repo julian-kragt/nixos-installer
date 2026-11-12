@@ -3,8 +3,8 @@ package stages
 import (
 	"context"
 
-	"installer/internal/pipeline"
-	"installer/internal/secrets"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/secrets"
 )
 
 // secretsRepository checks that the nix-secrets clone can take the host's

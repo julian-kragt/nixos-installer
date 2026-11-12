@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
 )
 
 const (

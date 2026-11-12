@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
 )
 
 // FailedUnits returns the names of the units on m that are failed.

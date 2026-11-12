@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"installer/internal/commands/git"
-	"installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/commands/git"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
 )
 
 // ref is the nixos-anywhere the install runs.
@@ -21,9 +21,9 @@ var osReleasePath = "/etc/os-release"
 type TargetKind int
 
 const (
-	TargetOther     TargetKind = iota
-	TargetISO                  // the NixOS installer: nixos-anywhere does not kexec it
-	TargetInstalled            // NixOS under the host's name
+	TargetOther     TargetKind = iota // neither: a system that must not be installed over
+	TargetISO                         // the NixOS installer: nixos-anywhere does not kexec it
+	TargetInstalled                   // NixOS under the host's name
 )
 
 // Inspect reads what target runs. It goes over the pinned connection, so it is

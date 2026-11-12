@@ -8,18 +8,18 @@ import (
 )
 
 func TestLoadMissingReturnsFreshState(t *testing.T) {
-	st, err := LoadState(t.TempDir(), "atlas")
+	st, err := LoadState(t.TempDir(), "myhost")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Host != "atlas" || len(st.Completed) != 0 {
+	if st.Host != "myhost" || len(st.Completed) != 0 {
 		t.Errorf("state: %+v", st)
 	}
 }
 
 func TestSaveLoadRoundTrip(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested")
-	want, err := LoadState(dir, "atlas")
+	want, err := LoadState(dir, "myhost")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,14 +27,14 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if err := want.Save(); err != nil {
 		t.Fatal(err)
 	}
-	got, err := LoadState(dir, "atlas")
+	got, err := LoadState(dir, "myhost")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
-	if want.Path() != filepath.Join(dir, "atlas.json") {
+	if want.Path() != filepath.Join(dir, "myhost.json") {
 		t.Errorf("path = %s", want.Path())
 	}
 	info, err := os.Stat(want.Path())
@@ -48,28 +48,28 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 
 func TestLoadCorruptFileFails(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "atlas.json"), []byte("{"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "myhost.json"), []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadState(dir, "atlas"); err == nil {
+	if _, err := LoadState(dir, "myhost"); err == nil {
 		t.Error("want error for corrupt state")
 	}
 }
 
 func TestSaveWithoutFileFails(t *testing.T) {
-	if err := (&State{Host: "atlas"}).Save(); err == nil {
+	if err := (&State{Host: "myhost"}).Save(); err == nil {
 		t.Error("a State that was not loaded has nowhere to save to")
 	}
 }
 
 func TestRemoveState(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"atlas.json", "atlas.known_hosts", "broadway.json", "broadway.known_hosts"} {
+	for _, name := range []string{"myhost.json", "myhost.known_hosts", "nexthost.json", "nexthost.known_hosts"} {
 		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := RemoveState(dir, "atlas"); err != nil {
+	if err := RemoveState(dir, "myhost"); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(dir)
@@ -80,10 +80,10 @@ func TestRemoveState(t *testing.T) {
 	for _, e := range entries {
 		left = append(left, e.Name())
 	}
-	if want := []string{"broadway.json", "broadway.known_hosts"}; !reflect.DeepEqual(left, want) {
+	if want := []string{"nexthost.json", "nexthost.known_hosts"}; !reflect.DeepEqual(left, want) {
 		t.Errorf("left = %v, want %v", left, want)
 	}
-	if err := RemoveState(dir, "atlas"); err != nil {
+	if err := RemoveState(dir, "myhost"); err != nil {
 		t.Errorf("nothing to remove: %v", err)
 	}
 }
@@ -92,21 +92,21 @@ func TestRemoveState(t *testing.T) {
 // fresh state take the place of what was saved.
 func TestConfirmReinstall(t *testing.T) {
 	dir := t.TempDir()
-	old := NewState(dir, "atlas")
+	old := NewState(dir, "myhost")
 	old.Completed = []string{"0.1", "0.2"}
 	if err := old.Save(); err != nil {
 		t.Fatal(err)
 	}
-	pinFile := filepath.Join(dir, "atlas.known_hosts")
+	pinFile := filepath.Join(dir, "myhost.known_hosts")
 	if err := os.WriteFile(pinFile, []byte("installed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	st, err := StartReinstall(dir, "atlas")
+	st, err := StartReinstall(dir, "myhost")
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := NewEnv(Inputs{Host: "atlas", Target: "192.168.1.100", Reinstall: true}, st)
+	env := NewEnv(Inputs{Host: "myhost", Target: "192.0.2.10", Reinstall: true}, st)
 	if env.Pin.File != pinFile+".reinstall" {
 		t.Fatalf("pin = %s, want the reinstall pin", env.Pin.File)
 	}

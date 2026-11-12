@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
 )
 
 // Config is the config flake at Dir, an absolute path, so nix finds the

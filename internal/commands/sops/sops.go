@@ -15,8 +15,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"installer/internal/machine"
-	"installer/internal/secrets"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/secrets"
 )
 
 // Repo is the nix-secrets repository at Dir on Machine.

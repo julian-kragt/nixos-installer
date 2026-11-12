@@ -15,8 +15,8 @@ import (
 	"path"
 	"path/filepath"
 
-	"installer/internal/machine"
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // HelperName is the helper's binary, built from cmd/nixos-installer-console.
@@ -100,7 +100,7 @@ func Helper(ctx context.Context, local machine.Machine, system string) (string, 
 	}
 	bin := filepath.Join(cache, "nixos-installer", system, HelperName)
 	_, err = local.Run(ctx, "env", "GOOS=linux", "GOARCH="+arch, "CGO_ENABLED=0",
-		"go", "build", "-trimpath", "-o", bin, "installer/cmd/"+HelperName)
+		"go", "build", "-trimpath", "-o", bin, "github.com/julian-kragt/nixos-installer/cmd/"+HelperName)
 	if err != nil {
 		return "", fmt.Errorf("build %s for %s (%s is not set, so the installer must run from its source tree): %w",
 			HelperName, system, EnvDir, err)

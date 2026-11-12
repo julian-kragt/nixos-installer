@@ -8,7 +8,7 @@ import (
 	"path"
 	"strings"
 
-	"installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
 )
 
 // KeyFile is where the config's sops-nix looks for the host's age key.

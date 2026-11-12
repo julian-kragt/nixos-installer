@@ -11,12 +11,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"installer/internal/commands/mkpasswd"
-	"installer/internal/commands/sops"
-	"installer/internal/commands/vim"
-	"installer/internal/machine"
-	"installer/internal/runner"
-	"installer/internal/secrets"
+	"github.com/julian-kragt/nixos-installer/internal/commands/mkpasswd"
+	"github.com/julian-kragt/nixos-installer/internal/commands/sops"
+	"github.com/julian-kragt/nixos-installer/internal/commands/vim"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/secrets"
 )
 
 // File is a secret file to write: its path and its template's, both relative

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"installer/internal/commands/luks"
-	"installer/internal/console"
-	"installer/internal/pipeline"
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/commands/luks"
+	"github.com/julian-kragt/nixos-installer/internal/console"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // cleanup checks that the install left nothing on the target that unlocks its

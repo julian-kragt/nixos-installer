@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
 )
 
 // switchUnit is the unit nixos-rebuild runs switch-to-configuration in. With

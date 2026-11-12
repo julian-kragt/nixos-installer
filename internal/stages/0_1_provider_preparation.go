@@ -9,13 +9,13 @@ import (
 	"slices"
 	"strings"
 
-	"installer/internal/commands/hardwareconfig"
-	"installer/internal/commands/luks"
-	"installer/internal/commands/nix"
-	"installer/internal/console"
-	"installer/internal/machine"
-	"installer/internal/pipeline"
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/commands/hardwareconfig"
+	"github.com/julian-kragt/nixos-installer/internal/commands/luks"
+	"github.com/julian-kragt/nixos-installer/internal/commands/nix"
+	"github.com/julian-kragt/nixos-installer/internal/console"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // providerPreparation makes sure everything is in place before the target is

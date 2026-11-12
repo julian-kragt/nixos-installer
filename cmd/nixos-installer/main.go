@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"installer/internal/pipeline"
-	"installer/internal/runner"
-	"installer/internal/stages"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/stages"
 )
 
 func main() {

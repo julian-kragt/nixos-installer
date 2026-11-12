@@ -10,7 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // HostTemplate and UserTemplate are the schemas of a host's own file and of a
@@ -201,10 +201,10 @@ func Document(content *yaml.Node, set ...Assignment) ([]byte, error) {
 type Class string
 
 const (
-	ClassPlaceholder Class = "placeholder"
-	ClassEmpty       Class = "empty"
-	ClassCrypt       Class = "crypt" // a crypt(3) hash: yescrypt, sha-512, bcrypt …
-	ClassValue       Class = "value"
+	ClassPlaceholder Class = "placeholder" // still holds one of the Placeholders
+	ClassEmpty       Class = "empty"       // the empty string
+	ClassCrypt       Class = "crypt"       // a crypt(3) hash: yescrypt, sha-512, bcrypt …
+	ClassValue       Class = "value"       // anything else
 )
 
 // Placeholders are the values, in lowercase, that mark a value to fill in
@@ -324,7 +324,7 @@ func text(n *yaml.Node) string {
 	return strings.TrimSpace(string(out))
 }
 
-// marshal writes the node n as YAML, indented the way nix-secrets is.
+// marshal writes the node n as YAML, indented by two spaces.
 func marshal(n *yaml.Node) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)

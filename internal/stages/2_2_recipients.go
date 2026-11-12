@@ -10,9 +10,9 @@ import (
 	"slices"
 	"strings"
 
-	"installer/internal/pipeline"
-	"installer/internal/runner"
-	"installer/internal/secrets"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/secrets"
 )
 
 // recipients makes the nix-secrets clone's .sops.yaml say exactly who decrypts

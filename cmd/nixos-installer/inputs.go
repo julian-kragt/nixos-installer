@@ -11,11 +11,11 @@ import (
 	"slices"
 	"strings"
 
-	"installer/internal/commands/nix"
-	"installer/internal/machine"
-	"installer/internal/pipeline"
-	"installer/internal/runner"
-	"installer/internal/stages"
+	"github.com/julian-kragt/nixos-installer/internal/commands/nix"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/stages"
 )
 
 // resolveInputs asks for whatever the flags left empty (config, secrets, host,
@@ -106,7 +106,7 @@ func askSecretsDir(ctx context.Context, dir string) (string, error) {
 	if dir != "" {
 		return checkSecretsDir(dir)
 	}
-	return askUntil(ctx, "Path to the nix-secrets repository", "--secrets", checkSecretsDir)
+	return askUntil(ctx, "Path to the secrets repository (the config's nix-secrets input)", "--secrets", checkSecretsDir)
 }
 
 // checkSecretsDir returns the absolute path of dir if it holds a .sops.yaml.

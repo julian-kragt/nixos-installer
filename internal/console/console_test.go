@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
 )
 
 // stubSystemd puts a systemd-run on PATH that records its args to a file and
@@ -54,11 +54,11 @@ func TestRunStartsTheHelperOnItsTerminal(t *testing.T) {
 	record := stubSystemd(t)
 	out := filepath.Join(t.TempDir(), "args")
 	withHelper(t, `echo "$*" > "`+out+`"`)
-	s := Session{Target: machine.Loopback(), Host: "atlas"}
-	if err := s.Run(context.Background(), "the test", "luks", "atlas"); err != nil {
+	s := Session{Target: machine.Loopback(), Host: "myhost"}
+	if err := s.Run(context.Background(), "the test", "luks", "myhost"); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := os.ReadFile(out); strings.TrimSpace(string(got)) != "luks atlas" {
+	if got, _ := os.ReadFile(out); strings.TrimSpace(string(got)) != "luks myhost" {
 		t.Errorf("helper args = %q", got)
 	}
 	calls, _ := os.ReadFile(record)
@@ -72,7 +72,7 @@ func TestRunStartsTheHelperOnItsTerminal(t *testing.T) {
 func TestRunReportsAnAbortAtTheConsole(t *testing.T) {
 	stubSystemd(t)
 	withHelper(t, "exit 1")
-	s := Session{Target: machine.Loopback(), Host: "atlas"}
+	s := Session{Target: machine.Loopback(), Host: "myhost"}
 	if err := s.Run(context.Background(), "the test"); !errors.Is(err, ErrAborted) {
 		t.Errorf("err = %v, want ErrAborted", err)
 	}
@@ -83,7 +83,7 @@ func TestRunStopsTheHelperWhenCancelled(t *testing.T) {
 	withHelper(t, "sleep 30")
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	s := Session{Target: machine.Loopback(), Host: "atlas"}
+	s := Session{Target: machine.Loopback(), Host: "myhost"}
 	if err := s.Run(ctx, "the test"); err == nil || errors.Is(err, ErrAborted) {
 		t.Errorf("err = %v, want the cancellation", err)
 	}

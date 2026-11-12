@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"installer/internal/machine"
-	"installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
 )
 
 const secretsCommit = "5c6778e007674df78a3bef30b28f805e5c1de32e"
@@ -18,7 +18,7 @@ func lockFile(rev string) string {
 	return `{"root":"root","nodes":{"root":{"inputs":{"nix-secrets":"nix-secrets"}},"nix-secrets":{"locked":{"rev":"` + rev + `"}}},"version":7}`
 }
 
-// flakeEnv returns an Env for atlas whose config repo is pushed to a bare
+// flakeEnv returns an Env for myhost whose config repo is pushed to a bare
 // remote and locks nix-secrets at an old rev. A fake nix's `flake update`
 // locks it at $FAKE_REV, which starts as the recorded SecretsCommit.
 func flakeEnv(t *testing.T) (*pipeline.Env, string) {
@@ -48,8 +48,8 @@ printf '{"root":"root","nodes":{"root":{"inputs":{"nix-secrets":"nix-secrets"}},
 	gitIn(t, dir, "push", "-q", "-u", "origin", "main")
 
 	env := &pipeline.Env{
-		Inputs: pipeline.Inputs{Host: "atlas", ConfigDir: dir, SecretsDir: t.TempDir()},
-		State:  pipeline.NewState(t.TempDir(), "atlas"),
+		Inputs: pipeline.Inputs{Host: "myhost", ConfigDir: dir, SecretsDir: t.TempDir()},
+		State:  pipeline.NewState(t.TempDir(), "myhost"),
 		Local:  machine.Local(),
 	}
 	env.State.SecretsCommit = secretsCommit
@@ -82,7 +82,7 @@ func TestFlakeInputLocksCommitsAndPushesOnce(t *testing.T) {
 	if head := gitIn(t, dir, "rev-parse", "HEAD"); env.State.ConfigRev != head || gitIn(t, remote, "rev-parse", "main") != head {
 		t.Errorf("ConfigRev = %q, HEAD %q, remote %q", env.State.ConfigRev, head, gitIn(t, remote, "rev-parse", "main"))
 	}
-	if msg := gitIn(t, dir, "log", "-1", "--format=%s"); msg != "chore(atlas): lock nix-secrets at 5c6778e" {
+	if msg := gitIn(t, dir, "log", "-1", "--format=%s"); msg != "chore(myhost): lock nix-secrets at 5c6778e" {
 		t.Errorf("message = %q", msg)
 	}
 	if reason, err := flakeInputOutdated(ctx, env); err != nil || reason != "" {

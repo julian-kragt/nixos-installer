@@ -21,11 +21,11 @@ import (
 	"syscall"
 	"time"
 
-	"installer/internal/authoring"
-	"installer/internal/commands/luks"
-	"installer/internal/console"
-	"installer/internal/machine"
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/authoring"
+	"github.com/julian-kragt/nixos-installer/internal/commands/luks"
+	"github.com/julian-kragt/nixos-installer/internal/console"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // readTime is how long a failure stays on screen before the console switches back.

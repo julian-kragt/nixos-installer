@@ -41,7 +41,7 @@ func ParseConfig(data []byte) (*Config, error) {
 	return &Config{root: root}, nil
 }
 
-// Marshal writes c as YAML, indented the way nix-secrets is.
+// Marshal writes c as YAML, indented by two spaces.
 func (c *Config) Marshal() ([]byte, error) {
 	out, err := marshal(c.root)
 	if err != nil {
@@ -138,6 +138,7 @@ func (c *Config) Apply(h Host) []string {
 // recipients, where it used Before.
 type Inserted struct{ File, Before string }
 
+// String describes the insertion for the operator.
 func (i Inserted) String() string {
 	return fmt.Sprintf("%s: %s goes before path_regex %s, which sops uses for it until now", i.File, FileRule(i.File), i.Before)
 }
@@ -173,6 +174,7 @@ type Shadow struct {
 	Rule string // the rule sops would use, as the operator finds it in .sops.yaml
 }
 
+// String describes the shadowed file for the operator.
 func (s Shadow) String() string {
 	return fmt.Sprintf("%s: sops would use %s, not %s", s.File, s.Rule, FileRule(s.File))
 }

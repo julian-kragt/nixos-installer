@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/netip"
 
-	"installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
 )
 
 // options are the command-line inputs. Empty inputs are completed by
@@ -24,7 +24,7 @@ func parseFlags(args []string, stderr io.Writer) (options, error) {
 	fs.SetOutput(stderr)
 	fs.BoolVar(&o.verbose, "verbose", false, "Enable verbose logging")
 	fs.StringVar(&o.ConfigDir, "config", "", "Path to the config flake (prompts when empty)")
-	fs.StringVar(&o.SecretsDir, "secrets", "", "Path to the nix-secrets repository (prompts when empty)")
+	fs.StringVar(&o.SecretsDir, "secrets", "", "Path to a clone of the secrets repository, the config's nix-secrets input (prompts when empty)")
 	fs.StringVar(&o.Host, "host", "", "Host to install (prompts when empty)")
 	fs.StringVar(&o.Target, "target", "", "IP address of the target device (prompts when empty)")
 	// The ISO's root password only lives until 0.2 reboots into the installed

@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"slices"
 
-	"installer/internal/machine"
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // Inputs are the operator's choices for this run. They are complete before

@@ -8,11 +8,11 @@ import (
 
 func TestParseFlags(t *testing.T) {
 	var buf bytes.Buffer
-	o, err := parseFlags([]string{"--target", "192.168.1.100", "--host", "atlas", "--verbose"}, &buf)
+	o, err := parseFlags([]string{"--target", "192.0.2.10", "--host", "myhost", "--verbose"}, &buf)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.Target != "192.168.1.100" || o.Host != "atlas" || o.ConfigDir != "" || !o.verbose || o.Reinstall || o.GenerateHardware {
+	if o.Target != "192.0.2.10" || o.Host != "myhost" || o.ConfigDir != "" || !o.verbose || o.Reinstall || o.GenerateHardware {
 		t.Fatalf("got %+v", o)
 	}
 	if o, err := parseFlags([]string{"--secrets", "../nix-secrets"}, &buf); err != nil || o.SecretsDir != "../nix-secrets" {

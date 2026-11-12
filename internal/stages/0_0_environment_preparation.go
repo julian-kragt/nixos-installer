@@ -6,9 +6,9 @@ import (
 	"net"
 	"os/exec"
 
-	"installer/internal/machine"
-	"installer/internal/pipeline"
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // environmentPreparation checks the provider machine and the target before

@@ -9,23 +9,23 @@ import (
 	"strings"
 	"testing"
 
-	"installer/internal/commands/sops"
-	"installer/internal/machine"
-	"installer/internal/runner"
-	"installer/internal/secrets"
+	"github.com/julian-kragt/nixos-installer/internal/commands/sops"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/secrets"
 )
 
 func TestArg(t *testing.T) {
 	for _, f := range []File{
-		{Path: "hosts/atlas.yaml", Template: secrets.HostTemplate},
-		{Path: "host-users/atlas-jkragt.yaml", Template: secrets.UserTemplate, User: "jkragt"},
+		{Path: "hosts/myhost.yaml", Template: secrets.HostTemplate},
+		{Path: "host-users/myhost-jdoe.yaml", Template: secrets.UserTemplate, User: "jdoe"},
 	} {
 		got, err := ParseArg(f.Arg())
 		if err != nil || got != f {
 			t.Errorf("ParseArg(%q) = %+v, %v", f.Arg(), got, err)
 		}
 	}
-	for _, bad := range []string{"", "hosts/atlas.yaml", "=templates/host.yaml", "hosts/atlas.yaml="} {
+	for _, bad := range []string{"", "hosts/myhost.yaml", "=templates/host.yaml", "hosts/myhost.yaml="} {
 		if _, err := ParseArg(bad); err == nil {
 			t.Errorf("ParseArg(%q): want an error", bad)
 		}
@@ -33,12 +33,12 @@ func TestArg(t *testing.T) {
 }
 
 func TestLabel(t *testing.T) {
-	user := File{Path: "host-users/atlas-jkragt.yaml", User: "jkragt"}
-	if got := label("atlas", user, secrets.Path{"hashedPassword"}); got != "Login password for jkragt on atlas" {
+	user := File{Path: "host-users/myhost-jdoe.yaml", User: "jdoe"}
+	if got := label("myhost", user, secrets.Path{"hashedPassword"}); got != "Login password for jdoe on myhost" {
 		t.Errorf("user password: %q", got)
 	}
-	host := File{Path: "hosts/atlas.yaml"}
-	if got := label("atlas", host, secrets.Path{"db", "hashedPassword"}); got != "db.hashedPassword for hosts/atlas.yaml" {
+	host := File{Path: "hosts/myhost.yaml"}
+	if got := label("myhost", host, secrets.Path{"db", "hashedPassword"}); got != "db.hashedPassword for hosts/myhost.yaml" {
 		t.Errorf("nested password: %q", got)
 	}
 }
@@ -66,7 +66,7 @@ func TestAuthorHashesAndEncrypts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Apply(secrets.Host{Name: "atlas", Recipient: recipient, Users: map[string]string{"jkragt": recipient}})
+	cfg.Apply(secrets.Host{Name: "myhost", Recipient: recipient, Users: map[string]string{"jdoe": recipient}})
 	data, err := cfg.Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -85,8 +85,8 @@ func TestAuthorHashesAndEncrypts(t *testing.T) {
 	const password = "c0rrect-horse"
 	ui := runner.New(runner.Options{Out: &bytes.Buffer{}, In: strings.NewReader(password + "\n" + password + "\n")})
 	defer ui.Close()
-	f := File{Path: secrets.UserFile("atlas", "jkragt"), Template: secrets.UserTemplate, User: "jkragt"}
-	if err := Author(runner.NewContext(context.Background(), ui), machine.Local(), dir, "atlas", f); err != nil {
+	f := File{Path: secrets.UserFile("myhost", "jdoe"), Template: secrets.UserTemplate, User: "jdoe"}
+	if err := Author(runner.NewContext(context.Background(), ui), machine.Local(), dir, "myhost", f); err != nil {
 		t.Fatal(err)
 	}
 

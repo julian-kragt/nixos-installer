@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // flags make vim keep nothing besides the file it edits: no vimrc or plugins,

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
 )
 
 // Hash returns the yescrypt hash of password, computed on m. The password goes

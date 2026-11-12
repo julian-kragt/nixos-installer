@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"slices"
 
-	"installer/internal/commands/sops"
-	"installer/internal/pipeline"
-	"installer/internal/runner"
-	"installer/internal/secrets"
+	"github.com/julian-kragt/nixos-installer/internal/commands/sops"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/secrets"
 )
 
 // commitPush publishes the host's secrets as one commit in nix-secrets and

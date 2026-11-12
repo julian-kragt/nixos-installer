@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // operator returns a context whose runner reads the answers to questions from

@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
 )
 
 // fakeSystemctl puts a systemctl on PATH with the given script body.

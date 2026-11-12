@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	"installer/internal/commands/luks"
-	"installer/internal/commands/nix"
-	"installer/internal/commands/nixosanywhere"
-	"installer/internal/console"
-	"installer/internal/machine"
-	"installer/internal/pipeline"
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/commands/luks"
+	"github.com/julian-kragt/nixos-installer/internal/commands/nix"
+	"github.com/julian-kragt/nixos-installer/internal/commands/nixosanywhere"
+	"github.com/julian-kragt/nixos-installer/internal/console"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // sshWaitTimeout is how long the first boot may take, including the operator

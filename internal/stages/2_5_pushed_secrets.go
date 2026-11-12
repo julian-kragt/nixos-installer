@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 
-	"installer/internal/commands/sops"
-	"installer/internal/pipeline"
-	"installer/internal/runner"
-	"installer/internal/secrets"
+	"github.com/julian-kragt/nixos-installer/internal/commands/sops"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/secrets"
 )
 
 // pushedSecrets checks nix-secrets as the host will build it: at

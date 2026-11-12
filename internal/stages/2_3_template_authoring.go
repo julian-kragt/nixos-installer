@@ -8,13 +8,13 @@ import (
 	"path"
 	"path/filepath"
 
-	"installer/internal/authoring"
-	"installer/internal/commands/hostidentity"
-	"installer/internal/commands/sops"
-	"installer/internal/console"
-	"installer/internal/pipeline"
-	"installer/internal/runner"
-	"installer/internal/secrets"
+	"github.com/julian-kragt/nixos-installer/internal/authoring"
+	"github.com/julian-kragt/nixos-installer/internal/commands/hostidentity"
+	"github.com/julian-kragt/nixos-installer/internal/commands/sops"
+	"github.com/julian-kragt/nixos-installer/internal/console"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/secrets"
 )
 
 // authoringDir is the copy of the secrets repository on the target the console

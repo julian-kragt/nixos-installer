@@ -6,9 +6,9 @@ import (
 	"slices"
 	"strings"
 
-	"installer/internal/commands/hostidentity"
-	"installer/internal/pipeline"
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/commands/hostidentity"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // userIdentity gives every user on the host an age key of their own on the

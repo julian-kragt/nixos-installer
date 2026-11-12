@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"installer/internal/machine"
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // at points passwordPath into a temp dir for the test and returns it.

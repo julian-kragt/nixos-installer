@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
-	"installer/internal/machine"
-	"installer/internal/pipeline"
-	"installer/internal/secrets"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/secrets"
 )
 
 // encrypted is a stand-in for a sops file; the stages only look at its shape.
-const encrypted = "hashedPassword: ENC[AES256_GCM,data:abc,type:str]\nsops:\n  age:\n    - recipient: age1atlas\n"
+const encrypted = "hashedPassword: ENC[AES256_GCM,data:abc,type:str]\nsops:\n  age:\n    - recipient: age1myhost\n"
 
 func gitIn(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -37,7 +37,7 @@ func put(t *testing.T, dir, name, content string) {
 	}
 }
 
-// secretsEnv returns an Env for atlas with user jkragt (from a fake nix) and a
+// secretsEnv returns an Env for myhost with user jdoe (from a fake nix) and a
 // nix-secrets clone that has a pushed file of a user who left.
 func secretsEnv(t *testing.T) (*pipeline.Env, string) {
 	t.Helper()
@@ -53,7 +53,7 @@ func secretsEnvIn(t *testing.T, sub string) (*pipeline.Env, string) {
 	}
 	bin := t.TempDir()
 	put(t, bin, "nix", `#!/bin/sh
-printf '%s' '{"users":{"jkragt":{"uid":1000,"home":"/home/jkragt"}}}'
+printf '%s' '{"users":{"jdoe":{"uid":1000,"home":"/home/jdoe"}}}'
 `)
 	if err := os.Chmod(filepath.Join(bin, "nix"), 0o755); err != nil {
 		t.Fatal(err)
@@ -66,19 +66,19 @@ printf '%s' '{"users":{"jkragt":{"uid":1000,"home":"/home/jkragt"}}}'
 	dir := filepath.Join(top, sub)
 	gitIn(t, top, "init", "-q", "-b", "main")
 	put(t, dir, ".sops.yaml", "keys:\n  - &host_other age1other\ncreation_rules:\n  - path_regex: ^hosts/other\\.yaml$\n    key_groups:\n      - age:\n          - *host_other\n")
-	put(t, dir, "host-users/atlas-gone.yaml", encrypted)
-	put(t, dir, "host-users/other-jkragt.yaml", encrypted)
+	put(t, dir, "host-users/myhost-gone.yaml", encrypted)
+	put(t, dir, "host-users/other-jdoe.yaml", encrypted)
 	gitIn(t, top, "add", ".")
 	gitIn(t, top, "commit", "-q", "-m", "init")
 	gitIn(t, top, "remote", "add", "origin", remote)
 	gitIn(t, top, "push", "-q", "-u", "origin", "main")
 
 	env := &pipeline.Env{
-		Inputs: pipeline.Inputs{Host: "atlas", ConfigDir: t.TempDir(), SecretsDir: dir},
-		State:  pipeline.NewState(t.TempDir(), "atlas"),
+		Inputs: pipeline.Inputs{Host: "myhost", ConfigDir: t.TempDir(), SecretsDir: dir},
+		State:  pipeline.NewState(t.TempDir(), "myhost"),
 		Local:  machine.Local(),
 	}
-	env.State.HostRecipient, env.State.UserRecipients = "age1atlas", map[string]string{"jkragt": "age1jkragt"}
+	env.State.HostRecipient, env.State.UserRecipients = "age1myhost", map[string]string{"jdoe": "age1jdoe"}
 	return env, remote
 }
 
@@ -93,12 +93,12 @@ func TestRecipientsThenCommitPushMakeOneCommit(t *testing.T) {
 	if err := recipients(ctx, env); err != nil {
 		t.Fatalf("2.2: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "host-users/atlas-gone.yaml")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, "host-users/myhost-gone.yaml")); !os.IsNotExist(err) {
 		t.Errorf("file of the removed user: %v, want it deleted", err)
 	}
 	// What 2.3 would have encrypted.
-	put(t, dir, "hosts/atlas.yaml", encrypted)
-	put(t, dir, "host-users/atlas-jkragt.yaml", encrypted)
+	put(t, dir, "hosts/myhost.yaml", encrypted)
+	put(t, dir, "host-users/myhost-jdoe.yaml", encrypted)
 
 	start := gitIn(t, dir, "rev-parse", "HEAD")
 	for range 2 {
@@ -115,7 +115,7 @@ func TestRecipientsThenCommitPushMakeOneCommit(t *testing.T) {
 	if status := gitIn(t, dir, "status", "--porcelain"); status != "" {
 		t.Errorf("left uncommitted: %q", status)
 	}
-	if files := gitIn(t, dir, "ls-files"); strings.Contains(files, "atlas-gone") || !strings.Contains(files, "other-jkragt") {
+	if files := gitIn(t, dir, "ls-files"); strings.Contains(files, "myhost-gone") || !strings.Contains(files, "other-jdoe") {
 		t.Errorf("tracked files:\n%s", files)
 	}
 	if err := secretsRepository(ctx, env); err != nil {
@@ -142,8 +142,8 @@ func TestCommitPushCommitsDeletionsInASubdirectory(t *testing.T) {
 	if err := recipients(ctx, env); err != nil {
 		t.Fatal(err)
 	}
-	put(t, env.SecretsDir, "hosts/atlas.yaml", encrypted)
-	put(t, env.SecretsDir, "host-users/atlas-jkragt.yaml", encrypted)
+	put(t, env.SecretsDir, "hosts/myhost.yaml", encrypted)
+	put(t, env.SecretsDir, "host-users/myhost-jdoe.yaml", encrypted)
 	if err := commitPush(ctx, env); err != nil {
 		t.Fatal(err)
 	}
@@ -158,12 +158,12 @@ func TestCommitPushRefusesPlaintext(t *testing.T) {
 	if err := recipients(ctx, env); err != nil {
 		t.Fatal(err)
 	}
-	put(t, env.SecretsDir, "hosts/atlas.yaml", "placeholder: unused\n")
-	put(t, env.SecretsDir, "host-users/atlas-jkragt.yaml", encrypted)
+	put(t, env.SecretsDir, "hosts/myhost.yaml", "placeholder: unused\n")
+	put(t, env.SecretsDir, "host-users/myhost-jdoe.yaml", encrypted)
 	start := gitIn(t, env.SecretsDir, "rev-parse", "HEAD")
 
 	err := commitPush(ctx, env)
-	if err == nil || !strings.Contains(err.Error(), "hosts/atlas.yaml") {
+	if err == nil || !strings.Contains(err.Error(), "hosts/myhost.yaml") {
 		t.Fatalf("err = %v, want the plaintext file named", err)
 	}
 	if head := gitIn(t, env.SecretsDir, "rev-parse", "HEAD"); head != start {
@@ -177,9 +177,9 @@ func TestCommitPushRefusesPlaintext(t *testing.T) {
 func TestRecipientsRefusesAShadowingRule(t *testing.T) {
 	env, _ := secretsEnv(t)
 	path := filepath.Join(env.SecretsDir, ".sops.yaml")
-	put(t, env.SecretsDir, ".sops.yaml", "keys:\n  - &host_other age1other\n  - &host_atlas age1atlas\ncreation_rules:\n"+
+	put(t, env.SecretsDir, ".sops.yaml", "keys:\n  - &host_other age1other\n  - &host_myhost age1myhost\ncreation_rules:\n"+
 		"  - key_groups:\n      - age:\n          - *host_other\n"+
-		"  - path_regex: ^hosts/atlas\\.yaml$\n    key_groups:\n      - age:\n          - *host_atlas\n"+
+		"  - path_regex: ^hosts/myhost\\.yaml$\n    key_groups:\n      - age:\n          - *host_myhost\n"+
 		"  - path_regex: ^hosts/other\\.yaml$\n    key_groups:\n      - age:\n          - *host_other\n")
 	before, err := os.ReadFile(path)
 	if err != nil {
@@ -188,13 +188,13 @@ func TestRecipientsRefusesAShadowingRule(t *testing.T) {
 
 	err = recipients(context.Background(), env)
 	if err == nil {
-		t.Fatal("2.2 accepted a catch-all before atlas' rule")
+		t.Fatal("2.2 accepted a catch-all before myhost' rule")
 	}
-	if !strings.Contains(err.Error(), "hosts/atlas.yaml") {
-		t.Errorf("err = %v, want hosts/atlas.yaml named", err)
+	if !strings.Contains(err.Error(), "hosts/myhost.yaml") {
+		t.Errorf("err = %v, want hosts/myhost.yaml named", err)
 	}
-	// jkragt's file has no rule yet, the others are not atlas' files.
-	for _, f := range []string{"host-users/atlas-jkragt.yaml", "hosts/other.yaml", "host-users/other-jkragt.yaml", "atlas-gone"} {
+	// jdoe's file has no rule yet, the others are not myhost' files.
+	for _, f := range []string{"host-users/myhost-jdoe.yaml", "hosts/other.yaml", "host-users/other-jdoe.yaml", "myhost-gone"} {
 		if strings.Contains(err.Error(), f) {
 			t.Errorf("err = %v names %s", err, f)
 		}
@@ -202,7 +202,7 @@ func TestRecipientsRefusesAShadowingRule(t *testing.T) {
 	if after, _ := os.ReadFile(path); string(after) != string(before) {
 		t.Errorf(".sops.yaml changed:\n%s", after)
 	}
-	if _, err := os.Stat(filepath.Join(env.SecretsDir, "host-users/atlas-gone.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(env.SecretsDir, "host-users/myhost-gone.yaml")); err != nil {
 		t.Errorf("file of the removed user: %v, want it kept", err)
 	}
 }
@@ -225,8 +225,8 @@ func TestRecipientsAddsRulesBeforeACatchAll(t *testing.T) {
 		t.Fatal(err)
 	}
 	for file, want := range map[string][]string{
-		"hosts/atlas.yaml":             {"age1atlas"},
-		"host-users/atlas-jkragt.yaml": {"age1atlas", "age1jkragt"},
+		"hosts/myhost.yaml":           {"age1myhost"},
+		"host-users/myhost-jdoe.yaml": {"age1myhost", "age1jdoe"},
 	} {
 		if got, err := cfg.Recipients(file); err != nil || !slices.Equal(got, want) {
 			t.Errorf("%s: recipients = %q, %v, want %q", file, got, err, want)
@@ -239,7 +239,7 @@ func TestRecipientsAddsRulesBeforeACatchAll(t *testing.T) {
 // when a path_regex does not compile.
 func TestRecipientsAsksBeforeTakingAFileFromAnotherRule(t *testing.T) {
 	for name, tt := range map[string]struct{ rule, wantErr string }{
-		"differently written rule": {"  - path_regex: ^hosts/atlas.yaml$\n    key_groups:\n      - age:\n          - *host_other\n", "confirmation required"},
+		"differently written rule": {"  - path_regex: ^hosts/myhost.yaml$\n    key_groups:\n      - age:\n          - *host_other\n", "confirmation required"},
 		"broken path_regex":        {"  - path_regex: ^hosts/(\n    key_groups:\n      - age:\n          - *host_other\n", "path_regex"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -259,8 +259,8 @@ func TestRecipientsAsksBeforeTakingAFileFromAnotherRule(t *testing.T) {
 
 func TestSecretsRepositoryRefusesUnrelatedChanges(t *testing.T) {
 	env, _ := secretsEnv(t)
-	put(t, env.SecretsDir, "host-users/other-jkragt.yaml", "changed")
-	if err := secretsRepository(context.Background(), env); err == nil || !strings.Contains(err.Error(), "other-jkragt") {
+	put(t, env.SecretsDir, "host-users/other-jdoe.yaml", "changed")
+	if err := secretsRepository(context.Background(), env); err == nil || !strings.Contains(err.Error(), "other-jdoe") {
 		t.Errorf("err = %v, want the unrelated change named", err)
 	}
 }
@@ -272,10 +272,10 @@ func TestUserIdentityOutdatedWhenTheUsersChange(t *testing.T) {
 		recorded   map[string]string
 		wantReason string
 	}{
-		{"same users", map[string]string{"jkragt": "age1jkragt"}, ""},
-		{"user removed from the host", map[string]string{"jkragt": "age1jkragt", "gone": "age1gone"}, "the users of atlas are jkragt, the recorded ones gone, jkragt"},
-		{"user added to the host", nil, "the users of atlas are jkragt, the recorded ones none"},
-		{"recipient missing", map[string]string{"jkragt": ""}, "no recipient is recorded for jkragt"},
+		{"same users", map[string]string{"jdoe": "age1jdoe"}, ""},
+		{"user removed from the host", map[string]string{"jdoe": "age1jdoe", "gone": "age1gone"}, "the users of myhost are jdoe, the recorded ones gone, jdoe"},
+		{"user added to the host", nil, "the users of myhost are jdoe, the recorded ones none"},
+		{"recipient missing", map[string]string{"jdoe": ""}, "no recipient is recorded for jdoe"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -297,7 +297,7 @@ func encryptedTo(recipients ...string) string {
 	return s
 }
 
-// pushedEnv returns an Env after 2.2 to 2.4: atlas' files committed, pushed
+// pushedEnv returns an Env after 2.2 to 2.4: myhost' files committed, pushed
 // and recorded as SecretsCommit.
 func pushedEnv(t *testing.T) *pipeline.Env {
 	t.Helper()
@@ -306,8 +306,8 @@ func pushedEnv(t *testing.T) *pipeline.Env {
 	if err := recipients(ctx, env); err != nil {
 		t.Fatal(err)
 	}
-	put(t, env.SecretsDir, "hosts/atlas.yaml", encryptedTo("age1atlas"))
-	put(t, env.SecretsDir, "host-users/atlas-jkragt.yaml", encryptedTo("age1atlas", "age1jkragt"))
+	put(t, env.SecretsDir, "hosts/myhost.yaml", encryptedTo("age1myhost"))
+	put(t, env.SecretsDir, "host-users/myhost-jdoe.yaml", encryptedTo("age1myhost", "age1jdoe"))
 	if err := commitPush(ctx, env); err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func pushedEnv(t *testing.T) *pipeline.Env {
 
 func TestPushedSecretsChecksTheCommitNotTheFiles(t *testing.T) {
 	env := pushedEnv(t)
-	put(t, env.SecretsDir, "hosts/atlas.yaml", "placeholder: unused\n")
+	put(t, env.SecretsDir, "hosts/myhost.yaml", "placeholder: unused\n")
 	if err := pushedSecrets(context.Background(), env); err != nil {
 		t.Errorf("err = %v", err)
 	}
@@ -331,14 +331,14 @@ func TestPushedSecretsReportsEveryProblem(t *testing.T) {
 		want   []string
 	}{
 		{"plaintext", func(t *testing.T, dir string) {
-			put(t, dir, "hosts/atlas.yaml", "hashedPassword: plain\n")
-		}, true, []string{"hosts/atlas.yaml: hashedPassword is not encrypted"}},
+			put(t, dir, "hosts/myhost.yaml", "hashedPassword: plain\n")
+		}, true, []string{"hosts/myhost.yaml: hashedPassword is not encrypted"}},
 		{"missing user file", func(t *testing.T, dir string) {
-			gitIn(t, dir, "rm", "-q", "host-users/atlas-jkragt.yaml")
-		}, true, []string{"host-users/atlas-jkragt.yaml: missing"}},
+			gitIn(t, dir, "rm", "-q", "host-users/myhost-jdoe.yaml")
+		}, true, []string{"host-users/myhost-jdoe.yaml: missing"}},
 		{"recipient mismatch", func(t *testing.T, dir string) {
-			put(t, dir, "host-users/atlas-jkragt.yaml", encryptedTo("age1atlas"))
-		}, true, []string{"host-users/atlas-jkragt.yaml: encrypted to other recipients"}},
+			put(t, dir, "host-users/myhost-jdoe.yaml", encryptedTo("age1myhost"))
+		}, true, []string{"host-users/myhost-jdoe.yaml: encrypted to other recipients"}},
 		{"shadowing catch-all", func(t *testing.T, dir string) {
 			data, err := os.ReadFile(filepath.Join(dir, ".sops.yaml"))
 			if err != nil {
@@ -346,36 +346,36 @@ func TestPushedSecretsReportsEveryProblem(t *testing.T) {
 			}
 			put(t, dir, ".sops.yaml", strings.Replace(string(data), "creation_rules:\n", "creation_rules:\n"+catchAll, 1))
 		}, true, []string{
-			"hosts/atlas.yaml: sops would use creation rule 1, which has no path_regex",
-			"host-users/atlas-jkragt.yaml: sops would use creation rule 1",
-			"hosts/atlas.yaml: encrypted to other recipients",
+			"hosts/myhost.yaml: sops would use creation rule 1, which has no path_regex",
+			"host-users/myhost-jdoe.yaml: sops would use creation rule 1",
+			"hosts/myhost.yaml: encrypted to other recipients",
 		}},
 		{"file of a removed user", func(t *testing.T, dir string) {
-			put(t, dir, "host-users/atlas-gone.yaml", encryptedTo("age1atlas"))
-		}, true, []string{"host-users/atlas-gone.yaml: gone is no longer a user of atlas"}},
+			put(t, dir, "host-users/myhost-gone.yaml", encryptedTo("age1myhost"))
+		}, true, []string{"host-users/myhost-gone.yaml: gone is no longer a user of myhost"}},
 		{"not pushed", func(t *testing.T, dir string) {
 			put(t, dir, "notes", "local")
 		}, false, []string{"is not on the upstream"}},
 		// Without .sops.yaml the checks that need no recipients still run.
 		{"no .sops.yaml", func(t *testing.T, dir string) {
 			gitIn(t, dir, "rm", "-q", ".sops.yaml")
-			put(t, dir, "hosts/atlas.yaml", "hashedPassword: plain\n")
-			put(t, dir, "host-users/atlas-gone.yaml", encryptedTo("age1atlas"))
+			put(t, dir, "hosts/myhost.yaml", "hashedPassword: plain\n")
+			put(t, dir, "host-users/myhost-gone.yaml", encryptedTo("age1myhost"))
 		}, true, []string{
 			".sops.yaml: missing",
-			"hosts/atlas.yaml: hashedPassword is not encrypted",
-			"host-users/atlas-gone.yaml: gone is no longer a user of atlas",
+			"hosts/myhost.yaml: hashedPassword is not encrypted",
+			"host-users/myhost-gone.yaml: gone is no longer a user of myhost",
 		}},
 		{"no rule and plaintext", func(t *testing.T, dir string) {
 			data, err := os.ReadFile(filepath.Join(dir, ".sops.yaml"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			cfg := strings.Replace(string(data), `^host-users/atlas-jkragt\.yaml$`, `^host-users/nobody\.yaml$`, 1)
+			cfg := strings.Replace(string(data), `^host-users/myhost-jdoe\.yaml$`, `^host-users/nobody\.yaml$`, 1)
 			put(t, dir, ".sops.yaml", cfg)
-			put(t, dir, "host-users/atlas-jkragt.yaml", "hashedPassword: plain\n")
+			put(t, dir, "host-users/myhost-jdoe.yaml", "hashedPassword: plain\n")
 		}, true, []string{
-			"host-users/atlas-jkragt.yaml: hashedPassword is not encrypted; .sops.yaml: no creation rule matches host-users/atlas-jkragt.yaml",
+			"host-users/myhost-jdoe.yaml: hashedPassword is not encrypted; .sops.yaml: no creation rule matches host-users/myhost-jdoe.yaml",
 		}},
 	}
 	for _, tt := range tests {
@@ -427,7 +427,7 @@ func TestPushedSecretsReopensTheSecretsPhase(t *testing.T) {
 	env := pushedEnv(t)
 	env.State.Completed = []string{"1.3", "2.1", "2.2", "2.3", "2.4"}
 	dir := env.SecretsDir
-	put(t, dir, "hosts/atlas.yaml", "hashedPassword: plain\n")
+	put(t, dir, "hosts/myhost.yaml", "hashedPassword: plain\n")
 	gitIn(t, dir, "commit", "-q", "-am", "plain")
 	gitIn(t, dir, "push", "-q")
 	env.State.SecretsCommit = gitIn(t, dir, "rev-parse", "HEAD")
@@ -436,7 +436,7 @@ func TestPushedSecretsReopensTheSecretsPhase(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "the next run repeats stages 2.1 to 2.5") {
 		t.Fatalf("err = %v, want the way forward", err)
 	}
-	saved, err := pipeline.LoadState(filepath.Dir(env.State.Path()), "atlas")
+	saved, err := pipeline.LoadState(filepath.Dir(env.State.Path()), "myhost")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
 )
 
 // fakeSystemctl puts a systemctl on PATH whose nth call (from 1) runs the nth
@@ -70,7 +70,7 @@ func TestAwaitSwitchTimesOut(t *testing.T) {
 
 func TestCurrentSystem(t *testing.T) {
 	dir := t.TempDir()
-	system := filepath.Join(dir, "nixos-system-atlas")
+	system := filepath.Join(dir, "nixos-system-myhost")
 	if err := os.Mkdir(system, 0o755); err != nil {
 		t.Fatal(err)
 	}

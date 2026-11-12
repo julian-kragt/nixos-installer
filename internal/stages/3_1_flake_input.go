@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"installer/internal/pipeline"
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
 // secretsInput is the config's flake input that holds nix-secrets.
@@ -63,7 +63,7 @@ func flakeInput(ctx context.Context, env *pipeline.Env) error {
 		return err
 	}
 	env.State.ConfigRev = head
-	runner.Info(ctx, "nixos-config is at "+head)
+	runner.Info(ctx, "The config is at "+head)
 	return nil
 }
 

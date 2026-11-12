@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"slices"
 
-	"installer/internal/commands/nix"
-	"installer/internal/machine"
-	"installer/internal/pipeline"
-	"installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/commands/nix"
+	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/pipeline"
+	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
-// bootstrapModule is where the bootstrap system gets what readiness checks.
-const bootstrapModule = "nixos-bootstrap's bootstrap.nix"
+// bootstrapHint tells the operator where the bootstrap system gets what
+// readiness checks: the nixos-bootstrap version the config locks.
+const bootstrapHint = "the bootstrap system comes from the config's nixos-bootstrap input (https://github.com/julian-kragt/nixos-bootstrap); update that input"
 
 // readiness checks that the installed bootstrap system has what the later
 // stages run on it.
@@ -35,7 +36,7 @@ func readiness(ctx context.Context, env *pipeline.Env) error {
 func checkTools(ctx context.Context, target machine.Machine, tools ...string) error {
 	for _, tool := range tools {
 		if !target.HasCommand(ctx, tool) {
-			return fmt.Errorf("%s is missing on the target; add it to environment.systemPackages in %s", tool, bootstrapModule)
+			return fmt.Errorf("%s is missing on the target; %s", tool, bootstrapHint)
 		}
 	}
 	return nil
@@ -49,7 +50,7 @@ func checkNixFeatures(ctx context.Context, target machine.Machine, want ...strin
 	}
 	for _, f := range want {
 		if !slices.Contains(have, f) {
-			return fmt.Errorf("nix on the target does not enable %s; add it to nix.settings.experimental-features in %s", f, bootstrapModule)
+			return fmt.Errorf("nix on the target does not enable the %s feature; %s", f, bootstrapHint)
 		}
 	}
 	return nil
@@ -62,7 +63,7 @@ func checkGitHub(ctx context.Context, target machine.Machine) error {
 		return fmt.Errorf("target cannot reach github.com: %w", err)
 	}
 	if _, err := target.Quiet().Run(ctx, "ssh-keygen", "-F", "github.com", "-f", "/etc/ssh/ssh_known_hosts"); err != nil {
-		return fmt.Errorf("github.com is not a known host on the target; set programs.ssh.knownHosts in %s", bootstrapModule)
+		return fmt.Errorf("github.com is not a known host on the target; %s", bootstrapHint)
 	}
 	return nil
 }
