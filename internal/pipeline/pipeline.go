@@ -5,8 +5,11 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"slices"
 
 	"installer/internal/machine"
 	"installer/internal/runner"
@@ -20,7 +23,7 @@ type Inputs struct {
 	ConfigDir   string // absolute path to the config flake
 	SecretsDir  string // absolute path to the nix-secrets clone the secrets phase writes and pushes
 	SSHPassword string // root SSH password of the NixOS ISO for initial key bootstrap; prompts when empty
-	Reinstall   bool   // delete what is saved for Host before loading its state
+	Reinstall   bool   // install Host again from the ISO: start from a fresh state, replace what is saved once the wipe is confirmed
 	// GenerateHardware generates a missing hardware config without asking.
 	GenerateHardware bool
 }
@@ -37,10 +40,33 @@ type Env struct {
 }
 
 // NewEnv returns the Env for a run: in must be complete and st loaded. The host
-// key pin lives next to the state file.
+// key pin lives next to the state file; a reinstall pins to its own file until
+// ConfirmReinstall.
 func NewEnv(in Inputs, st *State) *Env {
 	pin := machine.NewHostPin(filepath.Dir(st.Path()), st.Host)
+	if in.Reinstall {
+		pin = machine.NewReinstallPin(filepath.Dir(st.Path()), st.Host)
+	}
 	return &Env{Inputs: in, State: st, Local: machine.Local(), Remote: machine.SSH(in.Target, pin), Pin: pin}
+}
+
+// ConfirmReinstall replaces what is saved for the host by the reinstall, once
+// the operator confirmed the wipe: the state file and pin are deleted, and the
+// pin of the reinstall takes the pin's place. It does nothing on another run.
+func (e *Env) ConfirmReinstall() error {
+	if !e.Reinstall {
+		return nil
+	}
+	dir := filepath.Dir(e.State.Path())
+	if err := RemoveState(dir, e.Host); err != nil {
+		return err
+	}
+	pin := machine.NewHostPin(dir, e.Host)
+	if err := os.Rename(e.Pin.File, pin.File); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("state: move the pinned host key: %w", err)
+	}
+	e.Pin, e.Remote, e.Reinstall = pin, machine.SSH(e.Target, pin), false
+	return nil
 }
 
 // Stage is one step of the pipeline.
@@ -60,9 +86,12 @@ type Stage struct {
 // skipped unless it is outdated; every other stage is recorded there when it
 // succeeds and the state is saved, so the next invocation resumes behind it.
 // An outdated stage and every stage after it are no longer completed: they
-// build on what it recorded.
+// build on what it recorded. An ID in State.Completed that is no stage, as one
+// of a stage that was removed, is dropped.
 func Run(ctx context.Context, env *Env, stages []Stage) error {
 	runner.Info(ctx, "Starting pipeline")
+	ids := stageIDs(stages)
+	env.State.Completed = slices.DeleteFunc(env.State.Completed, func(id string) bool { return !slices.Contains(ids, id) })
 	for i, s := range stages {
 		title := s.ID + " " + s.Name
 		if !s.Always && env.State.IsCompleted(s.ID) {

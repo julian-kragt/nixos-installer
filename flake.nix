@@ -71,6 +71,17 @@
 
             nativeBuildInputs = [ pkgs.makeWrapper ];
 
+            # The tests drive real git repositories, encrypt with sops and a
+            # throwaway age key, and run the target's probes (hostname) locally.
+            nativeCheckInputs = [
+              pkgs.git
+              pkgs.inetutils
+              pkgs.openssh
+              pkgs.sops
+              pkgs.mkpasswd
+              pkgs.age
+            ];
+
             # ssh and git are shelled out to at runtime; sops, mkpasswd and vim
             # run on the target, in the console helper. nix itself is taken from
             # the operator's PATH so it matches their daemon.

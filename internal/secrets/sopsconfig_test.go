@@ -46,11 +46,12 @@ func marshalConfig(t *testing.T, c *Config) []byte {
 	return out
 }
 
-// apply is c.Apply(h) on a config in which nothing shadows h's files.
+// apply is c.Apply(h) on a config in which no rule comes before an existing
+// rule of h's files, as 2.2 checks.
 func apply(t *testing.T, c *Config, h Host) []string {
 	t.Helper()
-	users := slices.Sorted(maps.Keys(h.Users))
-	if shadowed, err := c.Shadowed(Files(h.Name, users)); err != nil || len(shadowed) != 0 {
+	files := slices.DeleteFunc(Files(h.Name, slices.Sorted(maps.Keys(h.Users))), func(f string) bool { return !c.HasRule(f) })
+	if shadowed, err := c.Shadowed(files); err != nil || len(shadowed) != 0 {
 		t.Fatalf("shadowed = %+v, %v", shadowed, err)
 	}
 	return c.Apply(h)
@@ -193,6 +194,105 @@ func TestNewRuleGoesLast(t *testing.T) {
 	}
 }
 
+// sops uses the first rule that matches a file, so a new rule must come before
+// a catch-all that would match its file.
+func TestNewRuleGoesBeforeACatchAll(t *testing.T) {
+	c, err := ParseConfig([]byte("keys:\n  - &everyone age1all\ncreation_rules:\n  - key_groups:\n      - age:\n          - *everyone\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply(t, c, Host{Name: "atlas", Recipient: atlasKey, Users: map[string]string{"jkragt": jkragtAt}})
+	for file, want := range map[string][]string{
+		HostFile("atlas"):           {atlasKey},
+		UserFile("atlas", "jkragt"): {atlasKey, jkragtAt},
+	} {
+		if got, err := c.Recipients(file); err != nil || !slices.Equal(got, want) {
+			t.Errorf("%s: recipients = %q, %v; the catch-all shadows the new rule", file, got, err)
+		}
+	}
+	if got, err := c.Recipients("templates/user.yaml"); err != nil || !slices.Equal(got, []string{"age1all"}) {
+		t.Errorf("catch-all recipients = %q, %v", got, err)
+	}
+}
+
+// The legacy script wrote the same rule more than once: every copy changes,
+// and a removed user is removed, and reported, once.
+func TestDuplicateRules(t *testing.T) {
+	const gone = "  - path_regex: ^host-users/atlas-gone\\.yaml$\n    key_groups:\n      - age:\n          - *host_atlas\n          - *user_gone_atlas\n"
+	const user = "  - path_regex: ^host-users/atlas-jkragt\\.yaml$\n    key_groups:\n      - age:\n          - *host_atlas\n          - *user_jkragt\n"
+	c, err := ParseConfig([]byte("keys:\n  - &host_atlas age1atlas\n  - &user_jkragt age1old\n  - &user_gone_atlas age1gone\ncreation_rules:\n" + gone + user + gone + user))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed := apply(t, c, atlas); !slices.Equal(removed, []string{"gone"}) {
+		t.Errorf("removed = %q, want [gone]", removed)
+	}
+	again, err := ParseConfig(marshalConfig(t, c))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var regexes []string
+	for _, r := range again.list("creation_rules") {
+		regexes = append(regexes, value(r, "path_regex").Value)
+		if aliases, _ := ageKeys(r); slices.Contains(aliases, "user_jkragt") {
+			t.Errorf("%s still lists *user_jkragt", value(r, "path_regex").Value)
+		}
+	}
+	if want := []string{UserRule("atlas", "jkragt"), UserRule("atlas", "jkragt"), HostRule("atlas")}; !slices.Equal(regexes, want) {
+		t.Errorf("rules = %q, want %q", regexes, want)
+	}
+}
+
+// An anchor of a removed user that something besides a creation rule still
+// refers to stays, so the file keeps parsing.
+func TestAnchorAliasedOutsideTheRulesStays(t *testing.T) {
+	const gone = "  - path_regex: ^host-users/atlas-gone\\.yaml$\n    key_groups:\n      - age:\n          - *host_atlas\n          - *user_gone_atlas\n"
+	c, err := ParseConfig([]byte("keys:\n  - &host_atlas age1atlas\n  - &user_gone_atlas age1gone\ncreation_rules:\n" + gone +
+		"destination_rules:\n  - s3_bucket: backup\n    key_groups:\n      - age:\n          - *user_gone_atlas\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply(t, c, Host{Name: "atlas", Recipient: atlasKey})
+	if _, ok := c.Key("user_gone_atlas"); !ok {
+		t.Error("anchor removed although destination_rules uses it")
+	}
+	if _, err := ParseConfig(marshalConfig(t, c)); err != nil {
+		t.Errorf("result does not parse: %v", err)
+	}
+}
+
+// The editor edits keys and creation_rules as flat lists; it refuses any other
+// shape instead of replacing it and the anchors in it.
+func TestParseRefusesKeysThatAreNotAList(t *testing.T) {
+	for _, data := range []string{
+		"keys:\n  hosts:\n    - &host_atlas age1atlas\ncreation_rules: []\n",
+		"keys: []\ncreation_rules:\n  path_regex: x\n",
+	} {
+		if _, err := ParseConfig([]byte(data)); err == nil || !strings.Contains(err.Error(), "not a list") {
+			t.Errorf("%q: err = %v, want 'not a list'", data, err)
+		}
+	}
+	if _, err := ParseConfig([]byte("keys:\ncreation_rules:\n")); err != nil {
+		t.Errorf("empty keys and creation_rules: %v", err)
+	}
+}
+
+// Reading a configuration never changes it.
+func TestReadsDoNotChangeTheConfig(t *testing.T) {
+	const data = "keys:\n  - &host_atlas age1atlas\n"
+	c, err := ParseConfig([]byte(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Recipients(HostFile("atlas"))
+	c.Shadowed([]string{HostFile("atlas")})
+	c.HasRule(HostFile("atlas"))
+	c.Replacements(atlas)
+	if got := string(marshalConfig(t, c)); got != data {
+		t.Errorf("after reads:\n%s\nwant:\n%s", got, data)
+	}
+}
+
 func TestEmptyConfig(t *testing.T) {
 	c, err := ParseConfig(nil)
 	if err != nil {
@@ -289,5 +389,48 @@ func TestLiteralRecipientsInARuleStay(t *testing.T) {
 		if got, err := again.Recipients(file); err != nil || !slices.Equal(got, want) {
 			t.Errorf("%s: recipients = %q, %v, want %q", file, got, err, want)
 		}
+	}
+}
+
+// A new rule that goes before a rule matching its file takes that file from
+// it, so it is listed; a catch-all without path_regex is not.
+func TestInsertions(t *testing.T) {
+	const keys = "keys:\n  - &admin age1admin\ncreation_rules:\n"
+	const unescaped = "  - path_regex: ^hosts/atlas.yaml$\n    key_groups:\n      - age:\n          - *admin\n"
+	const userGlob = "  - path_regex: ^host-users/atlas-.*\\.yaml$\n    key_groups:\n      - age:\n          - *admin\n"
+	const own = "  - path_regex: ^hosts/atlas\\.yaml$\n    key_groups:\n      - age:\n          - *admin\n"
+	const noRegex = "  - key_groups:\n      - age:\n          - *admin\n"
+	h := Host{Name: "atlas", Recipient: "age1atlas", Users: map[string]string{"jkragt": "age1jkragt"}}
+	tests := []struct {
+		name, rules string
+		want        []Inserted
+	}{
+		{"differently written rule", unescaped, []Inserted{{HostFile("atlas"), "^hosts/atlas.yaml$"}}},
+		{"rule for every user file", userGlob, []Inserted{{UserFile("atlas", "jkragt"), `^host-users/atlas-.*\.yaml$`}}},
+		{"own rule", own, nil},
+		{"catch-all", noRegex, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, err := ParseConfig([]byte(keys + tt.rules))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := c.Insertions(h)
+			if err != nil || !slices.Equal(got, tt.want) {
+				t.Errorf("insertions = %+v, %v, want %+v", got, err, tt.want)
+			}
+		})
+	}
+}
+
+// A broken path_regex is reported before Apply would add a rule past it.
+func TestInsertionsReportsABrokenRegex(t *testing.T) {
+	c, err := ParseConfig([]byte("creation_rules:\n  - path_regex: ^hosts/(\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Insertions(Host{Name: "atlas", Recipient: "age1atlas"}); err == nil || !strings.Contains(err.Error(), "path_regex") {
+		t.Errorf("err = %v, want the broken path_regex named", err)
 	}
 }

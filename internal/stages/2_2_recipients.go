@@ -18,7 +18,8 @@ import (
 // recipients makes the nix-secrets clone's .sops.yaml say exactly who decrypts
 // the host's files: the host, and each user's own key on it. Files of users who
 // are no longer on the host are deleted; 2.4 commits that. It changes nothing
-// while a rule would shadow a secret file's own rule.
+// while a rule comes before one of the host's files' own rule, and asks before
+// a new rule goes before one that matched its file.
 func recipients(ctx context.Context, env *pipeline.Env) error {
 	users, err := hostUsers(ctx, env)
 	if err != nil {
@@ -42,11 +43,18 @@ func recipients(ctx context.Context, env *pipeline.Env) error {
 	if err != nil {
 		return err
 	}
+	if err := checkRuleOrder(env, cfg, users); err != nil {
+		return err
+	}
+	inserted, err := cfg.Insertions(want)
+	if err != nil {
+		return err
+	}
 	stale, err := secrets.Stale(env.SecretsDir, env.Host, users)
 	if err != nil {
 		return err
 	}
-	if err := checkRuleOrder(env, cfg, users, stale); err != nil {
+	if err := confirmInsertions(ctx, inserted); err != nil {
 		return err
 	}
 	if err := confirmReplacements(ctx, cfg.Replacements(want)); err != nil {
@@ -75,17 +83,14 @@ func recipients(ctx context.Context, env *pipeline.Env) error {
 	return nil
 }
 
-// checkRuleOrder fails unless every secret file in the clone, and every file
-// the host is to have, is encrypted with its own rule: sops uses the first rule
-// that matches a file, and a broader one before it would give the file other
-// recipients. The files of removed users, which are deleted, do not count.
-func checkRuleOrder(env *pipeline.Env, cfg *secrets.Config, users, stale []string) error {
-	files, err := secrets.RepoFiles(env.SecretsDir)
-	if err != nil {
-		return err
-	}
-	files = slices.DeleteFunc(files, func(f string) bool { return slices.Contains(stale, f) })
-	shadowed, err := cfg.Shadowed(append(files, secrets.Files(env.Host, users)...))
+// checkRuleOrder fails unless each of the host's files that has a rule of its
+// own is encrypted with it: sops uses the first rule that matches a file, and
+// a broader one before it would give the file other recipients. A file
+// without a rule gets one from Apply, before any rule that matches it. Other
+// hosts' files are not this install's business.
+func checkRuleOrder(env *pipeline.Env, cfg *secrets.Config, users []string) error {
+	files := slices.DeleteFunc(secrets.Files(env.Host, users), func(f string) bool { return !cfg.HasRule(f) })
+	shadowed, err := cfg.Shadowed(files)
 	if err != nil || len(shadowed) == 0 {
 		return err
 	}
@@ -96,6 +101,23 @@ func checkRuleOrder(env *pipeline.Env, cfg *secrets.Config, users, stale []strin
 	return fmt.Errorf("%s has rules that come before a secret file's own rule:\n%s\n"+
 		"sops uses the first rule that matches a file; put each file's own rule first in %s, then run the installer again",
 		secrets.ConfigFile, strings.Join(lines, "\n"), filepath.Join(env.SecretsDir, secrets.ConfigFile))
+}
+
+// confirmInsertions shows the rules that go before a rule that matched their
+// file until now, and requires the operator to type "add": the file gets only
+// the host's recipients, not those of that rule.
+func confirmInsertions(ctx context.Context, inserted []secrets.Inserted) error {
+	if len(inserted) == 0 {
+		return nil
+	}
+	for _, i := range inserted {
+		runner.Info(ctx, i.String())
+	}
+	runner.Info(ctx, "Each of these files gets only the recipients of its new rule; to keep another rule's, give it the file's own path_regex "+
+		"and the installer keeps its literal recipients")
+	return runner.RequireTyped(ctx, "Type 'add' to add these rules: ", "add",
+		errors.New("confirmation required: run the installer in a terminal"),
+		errors.New("aborted: "+secrets.ConfigFile+" was not changed"))
 }
 
 // confirmReplacements shows the recipients that change and requires the

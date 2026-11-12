@@ -27,8 +27,10 @@ func parseFlags(args []string, stderr io.Writer) (options, error) {
 	fs.StringVar(&o.SecretsDir, "secrets", "", "Path to the nix-secrets repository (prompts when empty)")
 	fs.StringVar(&o.Host, "host", "", "Host to install (prompts when empty)")
 	fs.StringVar(&o.Target, "target", "", "IP address of the target device (prompts when empty)")
+	// The ISO's root password only lives until 0.2 reboots into the installed
+	// system, so showing it in ps or shell history is accepted.
 	fs.StringVar(&o.SSHPassword, "ssh-password", "", "Root SSH password of the NixOS ISO for the initial key bootstrap (prompts when empty)")
-	fs.BoolVar(&o.Reinstall, "reinstall", false, "Delete the host's saved state and pinned host key first, to install it again from the NixOS ISO")
+	fs.BoolVar(&o.Reinstall, "reinstall", false, "Install the host again from the NixOS ISO: its saved state and pinned host key are replaced once the wipe is confirmed")
 	fs.BoolVar(&o.GenerateHardware, "generate-hardware", false, "Generate a missing hardware config from the target without asking")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err

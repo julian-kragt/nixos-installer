@@ -20,9 +20,7 @@ and the secrets are typed there, so they never pass through this machine.
 Press Enter when the installer is running... `
 
 // showInstructions tells the operator how to prepare the target and waits for
-// Enter. Without an operator to ask (piped stdin) it carries on. Stage 0.0 is
-// never recorded, so a host with no completed stage stands for one whose
-// target 0.0 has not yet reached.
+// Enter. Without an operator to ask (piped stdin) it carries on.
 func showInstructions(ctx context.Context) error {
 	_, err := runner.Ask(ctx, instructions)
 	if errors.Is(err, io.EOF) {

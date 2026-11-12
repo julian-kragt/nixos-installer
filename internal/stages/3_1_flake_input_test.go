@@ -49,9 +49,10 @@ printf '{"root":"root","nodes":{"root":{"inputs":{"nix-secrets":"nix-secrets"}},
 
 	env := &pipeline.Env{
 		Inputs: pipeline.Inputs{Host: "atlas", ConfigDir: dir, SecretsDir: t.TempDir()},
-		State:  &pipeline.State{Host: "atlas", SecretsCommit: secretsCommit},
+		State:  pipeline.NewState(t.TempDir(), "atlas"),
 		Local:  machine.Local(),
 	}
+	env.State.SecretsCommit = secretsCommit
 	return env, remote
 }
 
@@ -89,15 +90,21 @@ func TestFlakeInputLocksCommitsAndPushesOnce(t *testing.T) {
 	}
 }
 
+// A remote that moved since 2.4 fails 3.1 and reopens 2.4 and 2.5, which
+// record and check the commit the clone is at after a pull.
 func TestFlakeInputRefusesAnotherRev(t *testing.T) {
 	env, _ := flakeEnv(t)
+	env.State.Completed = []string{"2.3", "2.4", "2.5"}
 	t.Setenv("FAKE_REV", "1111111111111111111111111111111111111111")
 	dir := env.ConfigDir
 	start, lock := gitIn(t, dir, "rev-parse", "HEAD"), readLock(t, dir)
 
 	err := flakeInput(context.Background(), env)
-	if err == nil || !strings.Contains(err.Error(), "branch moved") {
-		t.Fatalf("err = %v, want it to explain the moved branch", err)
+	if err == nil || !strings.Contains(err.Error(), "branch moved") || !strings.Contains(err.Error(), "repeats stages 2.4 and 2.5") {
+		t.Fatalf("err = %v, want it to explain the moved branch and the way forward", err)
+	}
+	if got := strings.Join(env.State.Completed, ","); got != "2.3" {
+		t.Errorf("completed = %s, want 2.3", got)
 	}
 	if head := gitIn(t, dir, "rev-parse", "HEAD"); head != start || readLock(t, dir) != lock {
 		t.Error("the config was changed")
@@ -160,12 +167,37 @@ func TestFlakeInputOutdated(t *testing.T) {
 	}{
 		{"locked", "abc", secretsCommit, ""},
 		{"no config revision", "", secretsCommit, "no config revision is recorded"},
-		{"new secrets commit", "abc", "3333333333333333333333333333333333333333", "the config locks nix-secrets at 5c6778e, not at 3333333"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			env.State.ConfigRev, env.State.SecretsCommit = tt.configRev, tt.secretsCommit
 			reason, err := flakeInputOutdated(context.Background(), env)
+			if err != nil || reason != tt.wantReason {
+				t.Errorf("reason = %q, %v, want %q", reason, err, tt.wantReason)
+			}
+		})
+	}
+}
+
+// After another host's install moved the config's lock, 2.4 runs again so a
+// new SecretsCommit is recorded for 3.1 to lock; before 3.1 it is not asked.
+func TestCommitPushOutdatedWhenTheLockMoved(t *testing.T) {
+	env, _ := flakeEnv(t)
+	put(t, env.ConfigDir, "flake.lock", lockFile("4444444444444444444444444444444444444444"))
+	tests := []struct {
+		name       string
+		completed  []string
+		recorded   string
+		wantReason string
+	}{
+		{"before 3.1", []string{"2.4"}, secretsCommit, ""},
+		{"lock moved", []string{"2.4", "2.5", "3.1"}, secretsCommit, "the config locks nix-secrets at 4444444, not at 5c6778e"},
+		{"lock in place", []string{"2.4", "2.5", "3.1"}, "4444444444444444444444444444444444444444", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env.State.Completed, env.State.SecretsCommit = tt.completed, tt.recorded
+			reason, err := commitPushOutdated(context.Background(), env)
 			if err != nil || reason != tt.wantReason {
 				t.Errorf("reason = %q, %v, want %q", reason, err, tt.wantReason)
 			}

@@ -87,3 +87,46 @@ func TestRemoveState(t *testing.T) {
 		t.Errorf("nothing to remove: %v", err)
 	}
 }
+
+// A reinstall pins to its own file; once the wipe is confirmed that pin and a
+// fresh state take the place of what was saved.
+func TestConfirmReinstall(t *testing.T) {
+	dir := t.TempDir()
+	old := NewState(dir, "atlas")
+	old.Completed = []string{"0.1", "0.2"}
+	if err := old.Save(); err != nil {
+		t.Fatal(err)
+	}
+	pinFile := filepath.Join(dir, "atlas.known_hosts")
+	if err := os.WriteFile(pinFile, []byte("installed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := StartReinstall(dir, "atlas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := NewEnv(Inputs{Host: "atlas", Target: "192.168.1.100", Reinstall: true}, st)
+	if env.Pin.File != pinFile+".reinstall" {
+		t.Fatalf("pin = %s, want the reinstall pin", env.Pin.File)
+	}
+	if err := os.WriteFile(env.Pin.File, []byte("iso"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := env.ConfirmReinstall(); err != nil {
+		t.Fatal(err)
+	}
+	if env.Reinstall || env.Pin.File != pinFile {
+		t.Errorf("env: reinstall %v, pin %s", env.Reinstall, env.Pin.File)
+	}
+	if data, err := os.ReadFile(pinFile); err != nil || string(data) != "iso" {
+		t.Errorf("pin = %q, %v, want the reinstall's", data, err)
+	}
+	if _, err := os.Stat(old.Path()); !os.IsNotExist(err) {
+		t.Errorf("old state: %v, want it deleted", err)
+	}
+	if err := env.ConfirmReinstall(); err != nil {
+		t.Errorf("a second call: %v", err)
+	}
+}

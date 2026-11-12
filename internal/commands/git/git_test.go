@@ -12,6 +12,15 @@ import (
 	"installer/internal/machine"
 )
 
+// TestMain gives git an identity, so commits work without the developer's
+// config, as in the Nix build's sandbox.
+func TestMain(m *testing.M) {
+	for k, v := range map[string]string{"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"} {
+		os.Setenv(k, v)
+	}
+	os.Exit(m.Run())
+}
+
 var ctx = context.Background()
 
 func sh(t *testing.T, dir string, args ...string) {
@@ -351,17 +360,17 @@ func TestShowAndFilesInASubdirectory(t *testing.T) {
 	}
 	write(t, dir, "a", "changed")
 
-	if data, ok, err := r.Show(ctx, head, "a"); err != nil || !ok || string(data) != "1" {
-		t.Errorf("show a = %q, %v, %v, want the committed content", data, ok, err)
+	if data, err := r.Show(ctx, head, "a"); err != nil || string(data) != "1" {
+		t.Errorf("show a = %q, %v, want the committed content", data, err)
 	}
-	if _, ok, err := r.Show(ctx, head, "missing"); err != nil || ok {
-		t.Errorf("show missing = %v, %v", ok, err)
+	if _, err := r.Show(ctx, head, "missing"); err == nil {
+		t.Error("show missing: no error")
 	}
-	if _, _, err := r.Show(ctx, "0000000000000000000000000000000000000000", "a"); err == nil {
+	if _, err := r.Show(ctx, "0000000000000000000000000000000000000000", "a"); err == nil {
 		t.Error("show at an unknown commit: no error")
 	}
-	files, err := r.Files(ctx, head, "host-users")
-	if want := []string{"host-users/x.yaml", "host-users/y.yaml"}; err != nil || !slices.Equal(files, want) {
+	files, err := r.Files(ctx, head, "a", "host-users", "none")
+	if want := []string{"a", "host-users/x.yaml", "host-users/y.yaml"}; err != nil || !slices.Equal(files, want) {
 		t.Errorf("files = %q, %v, want %q", files, err, want)
 	}
 	if files, err := r.Files(ctx, head, "none"); err != nil || len(files) != 0 {

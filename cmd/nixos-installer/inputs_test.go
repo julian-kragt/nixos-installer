@@ -162,7 +162,7 @@ func TestResolveInputsCompletesInputsAndLoadsState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	saved.Completed = []string{"0.1"}
+	saved.Completed = []string{"0.1", "0.2"}
 	if err := saved.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -175,12 +175,12 @@ func TestResolveInputsCompletesInputsAndLoadsState(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(out.String(), "Prepare the target") {
-		t.Errorf("instructions shown to a host with a completed stage:\n%s", out.String())
+		t.Errorf("instructions shown to an installed host:\n%s", out.String())
 	}
 	if in.Target != "192.168.1.100" || in.Host != "broadway" || in.SecretsDir != secretsDir {
 		t.Errorf("inputs: %+v", in)
 	}
-	if st.Host != "broadway" || len(st.Completed) != 1 {
+	if st.Host != "broadway" || len(st.Completed) != 2 {
 		t.Errorf("state: %+v", st)
 	}
 }
@@ -199,6 +199,49 @@ func TestResolveInputsShowsInstructionsToANewHost(t *testing.T) {
 	}
 }
 
+// After 0.1 the target may be booted into a fresh ISO again, which needs its
+// root password set again: the instructions show until 0.2 is done.
+func TestResolveInputsShowsInstructionsUntilTheBaseInstall(t *testing.T) {
+	stateDir := t.TempDir()
+	saved, err := pipeline.LoadState(stateDir, "atlas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved.Completed = []string{"0.1"}
+	if err := saved.Save(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, out := operator("\n")
+	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas"), SecretsDir: newSecrets(t), Host: "atlas", Target: "192.168.1.100"}
+	if _, err := resolveInputs(ctx, &in, stateDir); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Prepare the target") {
+		t.Errorf("no instructions before the base install:\n%s", out.String())
+	}
+}
+
+// A reinstall whose inputs are not complete deletes nothing.
+func TestResolveInputsReinstallKeepsTheStateWhenAborted(t *testing.T) {
+	stateDir := t.TempDir()
+	saved, err := pipeline.LoadState(stateDir, "atlas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved.Completed = []string{"0.1", "0.2"}
+	if err := saved.Save(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, _ := operator("") // no operator to give the target
+	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas"), SecretsDir: newSecrets(t), Host: "atlas", Reinstall: true}
+	if _, err := resolveInputs(ctx, &in, stateDir); err == nil || !strings.Contains(err.Error(), "--target is required") {
+		t.Fatalf("err = %v, want the missing target", err)
+	}
+	if _, err := os.Stat(saved.Path()); err != nil {
+		t.Errorf("state deleted although nothing ran: %v", err)
+	}
+}
+
 func TestResolveInputsFromFlagsAsksNothing(t *testing.T) {
 	ctx, _ := operator("")
 	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas"), SecretsDir: newSecrets(t), Host: "atlas", Target: "192.168.1.100"}
@@ -211,6 +254,9 @@ func TestResolveInputsFromFlagsAsksNothing(t *testing.T) {
 	}
 }
 
+// A reinstall starts from a fresh state and drops a reinstall pin left
+// behind, but keeps what is saved for the host until 0.1 has the wipe
+// confirmed.
 func TestResolveInputsReinstallStartsOver(t *testing.T) {
 	stateDir := t.TempDir()
 	saved, err := pipeline.LoadState(stateDir, "atlas")
@@ -222,20 +268,28 @@ func TestResolveInputsReinstallStartsOver(t *testing.T) {
 		t.Fatal(err)
 	}
 	pin := filepath.Join(stateDir, "atlas.known_hosts")
-	if err := os.WriteFile(pin, nil, 0o600); err != nil {
-		t.Fatal(err)
+	leftover := pin + ".reinstall"
+	for _, f := range []string{pin, leftover} {
+		if err := os.WriteFile(f, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	ctx, _ := operator("")
+	ctx, _ := operator("\n") // Enter after the instructions
 	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas"), SecretsDir: newSecrets(t), Host: "atlas", Target: "192.168.1.100", Reinstall: true}
 	st, err := resolveInputs(ctx, &in, stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(st.Completed) != 0 {
-		t.Errorf("state: %+v", st)
+	if len(st.Completed) != 0 || st.Path() != saved.Path() {
+		t.Errorf("state: %+v at %s", st, st.Path())
 	}
-	if _, err := os.Stat(pin); !os.IsNotExist(err) {
-		t.Errorf("pin not removed: %v", err)
+	for _, f := range []string{saved.Path(), pin} {
+		if _, err := os.Stat(f); err != nil {
+			t.Errorf("%s: %v, want it kept", f, err)
+		}
+	}
+	if _, err := os.Stat(leftover); !os.IsNotExist(err) {
+		t.Errorf("leftover reinstall pin not removed: %v", err)
 	}
 }

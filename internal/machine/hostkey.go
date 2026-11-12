@@ -26,6 +26,15 @@ func NewHostPin(stateDir, host string) HostPin {
 	return HostPin{Host: host, File: filepath.Join(stateDir, host+".known_hosts")}
 }
 
+// NewReinstallPin returns the pin of host during a reinstall, until the wipe
+// is confirmed: it is kept beside NewHostPin's, so the ISO's key is pinned
+// without losing the installed system's.
+func NewReinstallPin(stateDir, host string) HostPin {
+	pin := NewHostPin(stateDir, host)
+	pin.File += ".reinstall"
+	return pin
+}
+
 // Load returns the pinned key, or nil when nothing is pinned yet.
 func (p HostPin) Load() (ssh.PublicKey, error) {
 	data, err := os.ReadFile(p.File)

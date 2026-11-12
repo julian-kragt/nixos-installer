@@ -205,3 +205,25 @@ func TestOutdatedStageStaysOpenWhenALaterStageFails(t *testing.T) {
 		t.Fatalf("saved completed %s, want 0.1: 0.2 must run again next time", got)
 	}
 }
+
+// A stage that no longer exists, as 4.1 after it became 2.5, is dropped from
+// Completed instead of staying there for good.
+func TestDropsCompletedIDsThatAreNoStage(t *testing.T) {
+	var ran []string
+	dir := t.TempDir()
+	st, err := LoadState(dir, "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Completed = []string{"0.1", "4.1"}
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	st, _, err = run(t, dir, fake("0.1", &ran), fake("0.2", &ran))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(st.Completed, ","); got != "0.1,0.2" {
+		t.Errorf("completed %s, want 0.1,0.2", got)
+	}
+}

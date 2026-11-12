@@ -42,3 +42,10 @@ func TestParseFlags(t *testing.T) {
 		t.Fatalf("link-local without zone should ask for a zone, got %v", err)
 	}
 }
+
+func TestSSHPasswordFlag(t *testing.T) {
+	var buf bytes.Buffer
+	if o, err := parseFlags([]string{"--ssh-password", "x"}, &buf); err != nil || o.SSHPassword != "x" {
+		t.Errorf("password = %q, %v", o.SSHPassword, err)
+	}
+}
