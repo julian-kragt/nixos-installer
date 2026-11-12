@@ -18,8 +18,9 @@ import (
 // locks the commit into the config, so a bad commit is never deployed. The
 // commit must be on the remote, and hold exactly the host's files for the
 // users of the config, each encrypted to the recipients of its own rule.
-// Nothing is decrypted. It reports every problem, then reopens 2.1 to 2.4 and
-// fails: the next run checks the clone again and rewrites what it can. An
+// Nothing is decrypted. It reports every problem, then reopens 2.1 and every
+// stage after it, and fails: the next run checks the clone again, rewrites
+// what it can and locks and deploys the new commit. An
 // error that is not a problem of the commit, as a failed fetch, reopens
 // nothing, so the next run only checks again.
 func pushedSecrets(ctx context.Context, env *pipeline.Env) error {
@@ -40,13 +41,13 @@ func pushedSecrets(ctx context.Context, env *pipeline.Env) error {
 		return err
 	}
 	if len(problems) > 0 {
-		if err := env.State.Reopen(secretsStages...); err != nil {
+		if err := reopenFrom(env, stageSecretsRepository); err != nil {
 			return fmt.Errorf("persist state: %w", err)
 		}
 		return fmt.Errorf("nix-secrets at %.7s does not hold %s's secrets as it should:\n  %s\n"+
-			"the next run repeats stages %s to %s, which fix the clone at %s and push it again; "+
+			"the next run repeats stage %s and every stage after it, which fix the clone at %s and push it again; "+
 			"fix by hand what they cannot, then run the installer again",
-			commit, env.Host, strings.Join(problems, "\n  "), secretsStages[0], stagePushedSecrets, env.SecretsDir)
+			commit, env.Host, strings.Join(problems, "\n  "), stageSecretsRepository, env.SecretsDir)
 	}
 	runner.Info(ctx, fmt.Sprintf("nix-secrets at %.7s holds %s's secrets as it should", commit, env.Host))
 	return nil

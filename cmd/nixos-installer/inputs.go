@@ -54,7 +54,7 @@ func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*
 		if err != nil {
 			return err
 		}
-		if in.Reinstall || !stages.BaseInstalled(st) {
+		if !stages.BaseInstalled(st) { // a reinstall starts from a fresh state
 			if err := showInstructions(ctx); err != nil {
 				return err
 			}

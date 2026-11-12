@@ -130,3 +130,53 @@ func TestConfirmReinstall(t *testing.T) {
 		t.Errorf("a second call: %v", err)
 	}
 }
+
+// Without a reinstall pin the old pin goes too; a pin that cannot be moved
+// leaves the old state in place.
+func TestConfirmReinstallEdges(t *testing.T) {
+	dir := t.TempDir()
+	pinFile := filepath.Join(dir, "myhost.known_hosts")
+	saved := func() *State {
+		st := NewState(dir, "myhost")
+		st.Completed = []string{"0.2"}
+		if err := st.Save(); err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	reinstall := func() *Env {
+		st, err := StartReinstall(dir, "myhost")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return NewEnv(Inputs{Host: "myhost", Target: "192.0.2.10", Reinstall: true}, st)
+	}
+
+	old := saved()
+	if err := os.WriteFile(pinFile, []byte("installed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := reinstall().ConfirmReinstall(); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{old.Path(), pinFile} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("%s: %v, want it deleted", path, err)
+		}
+	}
+
+	old = saved()
+	if err := os.MkdirAll(filepath.Join(pinFile, "blocks-the-rename"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	env := reinstall()
+	if err := os.WriteFile(env.Pin.File, []byte("iso"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.ConfirmReinstall(); err == nil {
+		t.Fatal("moving the pin onto a directory succeeded")
+	}
+	if _, err := os.Stat(old.Path()); err != nil {
+		t.Errorf("old state: %v, want it kept", err)
+	}
+}

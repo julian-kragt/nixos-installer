@@ -18,17 +18,34 @@ import (
 const (
 	// stageBaseInstall is the stage after which the target's system must not
 	// change any more.
-	stageBaseInstall   = "0.2"
-	stageRecipients    = "2.2"
-	stageCommitPush    = "2.4"
-	stagePushedSecrets = "2.5"
-	stageFlakeInput    = "3.1"
+	stageBaseInstall       = "0.2"
+	stageSecretsRepository = "2.1"
+	stageRecipients        = "2.2"
+	stageCommitPush        = "2.4"
+	stagePushedSecrets     = "2.5"
+	stageFlakeInput        = "3.1"
 )
 
-// secretsStages are the stages that write the clone and push it, which 2.5
-// opens again when the pushed commit is not as it should be. They start at
-// 2.1, so the clone is checked before it is pushed again.
-var secretsStages = []string{"2.1", stageRecipients, "2.3", stageCommitPush}
+// order holds the IDs of All in order. init fills it: All refers to the
+// stages, which refer to it through reopenFrom.
+var order []string
+
+func init() {
+	for _, s := range All {
+		order = append(order, s.ID)
+	}
+}
+
+// reopenFrom drops the stage id and every stage after it from the completed
+// stages and saves the state, as pipeline.Run does for an outdated stage, so
+// nothing that depends on what the stage writes stays recorded as done.
+func reopenFrom(env *pipeline.Env, id string) error {
+	i := slices.Index(order, id)
+	if i < 0 {
+		panic("stages: no stage " + id)
+	}
+	return env.State.Reopen(order[i:]...)
+}
 
 // BaseInstalled reports whether st records the base install: until then the
 // target is to run the NixOS ISO, prepared as the instructions say.
@@ -42,7 +59,7 @@ var All = []pipeline.Stage{
 	{ID: "1.1", Name: "Readiness", Run: readiness},
 	{ID: "1.2", Name: "Host identity", Run: hostIdentity, Outdated: hostIdentityOutdated},
 	{ID: "1.3", Name: "User identity", Run: userIdentity, Outdated: userIdentityOutdated},
-	{ID: "2.1", Name: "Secrets repository", Run: secretsRepository},
+	{ID: stageSecretsRepository, Name: "Secrets repository", Run: secretsRepository},
 	{ID: stageRecipients, Name: "Recipients", Run: recipients},
 	{ID: "2.3", Name: "Template authoring", Run: templateAuthoring},
 	{ID: stageCommitPush, Name: "Commit and push", Run: commitPush, Outdated: commitPushOutdated},

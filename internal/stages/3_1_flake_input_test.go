@@ -94,13 +94,13 @@ func TestFlakeInputLocksCommitsAndPushesOnce(t *testing.T) {
 // record and check the commit the clone is at after a pull.
 func TestFlakeInputRefusesAnotherRev(t *testing.T) {
 	env, _ := flakeEnv(t)
-	env.State.Completed = []string{"2.3", "2.4", "2.5"}
+	env.State.Completed = []string{"2.3", "2.4", "2.5", "3.2", "3.3"}
 	t.Setenv("FAKE_REV", "1111111111111111111111111111111111111111")
 	dir := env.ConfigDir
 	start, lock := gitIn(t, dir, "rev-parse", "HEAD"), readLock(t, dir)
 
 	err := flakeInput(context.Background(), env)
-	if err == nil || !strings.Contains(err.Error(), "branch moved") || !strings.Contains(err.Error(), "repeats stages 2.4 and 2.5") {
+	if err == nil || !strings.Contains(err.Error(), "branch moved") || !strings.Contains(err.Error(), "repeats stage 2.4 and every stage after it") {
 		t.Fatalf("err = %v, want it to explain the moved branch and the way forward", err)
 	}
 	if got := strings.Join(env.State.Completed, ","); got != "2.3" {

@@ -421,11 +421,12 @@ func TestPushedSecretsFailsWithoutAnUpstreamAndReopensNothing(t *testing.T) {
 	}
 }
 
-// A commit with a problem reopens 2.1 to 2.4, so the next run checks the
-// clone, fixes it and pushes again; earlier stages stay done.
+// A commit with a problem reopens 2.1 and every stage after it, so the next
+// run checks the clone, fixes it, pushes, locks and deploys again; earlier
+// stages stay done.
 func TestPushedSecretsReopensTheSecretsPhase(t *testing.T) {
 	env := pushedEnv(t)
-	env.State.Completed = []string{"1.3", "2.1", "2.2", "2.3", "2.4"}
+	env.State.Completed = []string{"1.3", "2.1", "2.2", "2.3", "2.4", "3.1", "3.2", "3.3"}
 	dir := env.SecretsDir
 	put(t, dir, "hosts/myhost.yaml", "hashedPassword: plain\n")
 	gitIn(t, dir, "commit", "-q", "-am", "plain")
@@ -433,7 +434,7 @@ func TestPushedSecretsReopensTheSecretsPhase(t *testing.T) {
 	env.State.SecretsCommit = gitIn(t, dir, "rev-parse", "HEAD")
 
 	err := pushedSecrets(context.Background(), env)
-	if err == nil || !strings.Contains(err.Error(), "the next run repeats stages 2.1 to 2.5") {
+	if err == nil || !strings.Contains(err.Error(), "the next run repeats stage 2.1 and every stage after it") {
 		t.Fatalf("err = %v, want the way forward", err)
 	}
 	saved, err := pipeline.LoadState(filepath.Dir(env.State.Path()), "myhost")

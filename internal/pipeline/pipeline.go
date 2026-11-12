@@ -58,12 +58,23 @@ func (e *Env) ConfirmReinstall() error {
 		return nil
 	}
 	dir := filepath.Dir(e.State.Path())
-	if err := RemoveState(dir, e.Host); err != nil {
-		return err
-	}
 	pin := machine.NewHostPin(dir, e.Host)
-	if err := os.Rename(e.Pin.File, pin.File); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("state: move the pinned host key: %w", err)
+	// The rename replaces the old pin in one step, so a failure leaves
+	// everything saved as it was.
+	err := os.Rename(e.Pin.File, pin.File)
+	switch {
+	case errors.Is(err, os.ErrNotExist): // nothing pinned yet: forget the old pin too
+		err = RemoveState(dir, e.Host)
+	case err == nil:
+		err = os.Remove(e.State.Path())
+		if errors.Is(err, os.ErrNotExist) {
+			err = nil
+		}
+	default:
+		err = fmt.Errorf("state: move the pinned host key: %w", err)
+	}
+	if err != nil {
+		return err
 	}
 	e.Pin, e.Remote, e.Reinstall = pin, machine.SSH(e.Target, pin), false
 	return nil

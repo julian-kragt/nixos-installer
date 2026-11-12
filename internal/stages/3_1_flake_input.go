@@ -79,13 +79,13 @@ func lockSecrets(ctx context.Context, env *pipeline.Env) error {
 	}
 	if rev != env.State.SecretsCommit {
 		// 2.4 records the commit the clone is at, and 2.5 checks it.
-		if err := env.State.Reopen(stageCommitPush, stagePushedSecrets); err != nil {
+		if err := reopenFrom(env, stageCommitPush); err != nil {
 			return fmt.Errorf("persist state: %w", err)
 		}
 		return fmt.Errorf("the config's %s input now locks %s, not %s, which the secrets phase pushed: "+
 			"its branch moved since, or the input's URL is another repository than %s\n"+
-			"git -C %s pull, then run the installer again: it repeats stages %s and %s first",
-			secretsInput, rev, env.State.SecretsCommit, env.SecretsDir, env.SecretsDir, stageCommitPush, stagePushedSecrets)
+			"git -C %s pull, then run the installer again: it repeats stage %s and every stage after it",
+			secretsInput, rev, env.State.SecretsCommit, env.SecretsDir, env.SecretsDir, stageCommitPush)
 	}
 	message := fmt.Sprintf("chore(%s): lock nix-secrets at %.7s", env.Host, rev)
 	if _, err := configRepo(env).Commit(ctx, message, "flake.lock"); err != nil {
