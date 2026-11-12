@@ -1,3 +1,0 @@
-The Go installer is complete (see `docs/ROADMAP.md`). Plan the last step. Already done: `flake.nix` in this repo builds the installer with `buildGoModule`; `scripts/install-host.sh` and the `install` / `enroll-sops` / `deploy-remote` just recipes are removed from `../nixos-config`.
-
-Still to do in `../nixos-config`: add just recipes that call the installer (`nix run github:julian-kragt/nixos-installer`), rewrite `wiki/wiki_install_host.md` and the README sections. First list what the bash script did (`git -C ../nixos-config show 06dd040:scripts/install-host.sh`) that the installer does not, if anything.
