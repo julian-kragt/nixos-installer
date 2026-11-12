@@ -30,10 +30,16 @@ type State struct {
 	path string
 }
 
+// NewState returns a fresh State for host that saves to {dir}/{host}.json,
+// whatever that file holds now.
+func NewState(dir, host string) *State {
+	return &State{Host: host, path: filepath.Join(dir, host+".json")}
+}
+
 // LoadState reads {dir}/{host}.json into a State. If the file does not exist,
 // a fresh State for host is returned.
 func LoadState(dir, host string) (*State, error) {
-	s := &State{Host: host, path: filepath.Join(dir, host+".json")}
+	s := NewState(dir, host)
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return s, nil
@@ -45,6 +51,16 @@ func LoadState(dir, host string) (*State, error) {
 		return nil, fmt.Errorf("state: unmarshal %s: %w", s.path, err)
 	}
 	return s, nil
+}
+
+// StartReinstall returns a fresh State for host and removes the pin a reinstall
+// that was not confirmed left behind. What is saved for host stays until the
+// wipe is confirmed (Env.ConfirmReinstall), so an aborted reinstall loses nothing.
+func StartReinstall(dir, host string) (*State, error) {
+	if err := os.Remove(machine.NewReinstallPin(dir, host).File); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("state: remove: %w", err)
+	}
+	return NewState(dir, host), nil
 }
 
 // RemoveState deletes what is saved for host: its state file and its host key

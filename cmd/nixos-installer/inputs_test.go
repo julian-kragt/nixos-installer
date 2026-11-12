@@ -254,6 +254,9 @@ func TestResolveInputsFromFlagsAsksNothing(t *testing.T) {
 	}
 }
 
+// A reinstall starts from a fresh state and drops a reinstall pin left
+// behind, but keeps what is saved for the host until 0.1 has the wipe
+// confirmed.
 func TestResolveInputsReinstallStartsOver(t *testing.T) {
 	stateDir := t.TempDir()
 	saved, err := pipeline.LoadState(stateDir, "atlas")
@@ -265,20 +268,28 @@ func TestResolveInputsReinstallStartsOver(t *testing.T) {
 		t.Fatal(err)
 	}
 	pin := filepath.Join(stateDir, "atlas.known_hosts")
-	if err := os.WriteFile(pin, nil, 0o600); err != nil {
-		t.Fatal(err)
+	leftover := pin + ".reinstall"
+	for _, f := range []string{pin, leftover} {
+		if err := os.WriteFile(f, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	ctx, _ := operator("")
+	ctx, _ := operator("\n") // Enter after the instructions
 	in := pipeline.Inputs{ConfigDir: newConfig(t, "atlas"), SecretsDir: newSecrets(t), Host: "atlas", Target: "192.168.1.100", Reinstall: true}
 	st, err := resolveInputs(ctx, &in, stateDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(st.Completed) != 0 {
-		t.Errorf("state: %+v", st)
+	if len(st.Completed) != 0 || st.Path() != saved.Path() {
+		t.Errorf("state: %+v at %s", st, st.Path())
 	}
-	if _, err := os.Stat(pin); !os.IsNotExist(err) {
-		t.Errorf("pin not removed: %v", err)
+	for _, f := range []string{saved.Path(), pin} {
+		if _, err := os.Stat(f); err != nil {
+			t.Errorf("%s: %v, want it kept", f, err)
+		}
+	}
+	if _, err := os.Stat(leftover); !os.IsNotExist(err) {
+		t.Errorf("leftover reinstall pin not removed: %v", err)
 	}
 }

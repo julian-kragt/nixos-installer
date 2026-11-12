@@ -78,10 +78,14 @@ func lockSecrets(ctx context.Context, env *pipeline.Env) error {
 		return err
 	}
 	if rev != env.State.SecretsCommit {
+		// 2.4 records the commit the clone is at, and 2.5 checks it.
+		if err := env.State.Reopen(stageCommitPush, stagePushedSecrets); err != nil {
+			return fmt.Errorf("persist state: %w", err)
+		}
 		return fmt.Errorf("the config's %s input now locks %s, not %s, which the secrets phase pushed: "+
 			"its branch moved since, or the input's URL is another repository than %s\n"+
-			"git -C %s pull, remove \"2.4\" from Completed in %s, then run the installer again",
-			secretsInput, rev, env.State.SecretsCommit, env.SecretsDir, env.SecretsDir, env.State.Path())
+			"git -C %s pull, then run the installer again: it repeats stages %s and %s first",
+			secretsInput, rev, env.State.SecretsCommit, env.SecretsDir, env.SecretsDir, stageCommitPush, stagePushedSecrets)
 	}
 	message := fmt.Sprintf("chore(%s): lock nix-secrets at %.7s", env.Host, rev)
 	if _, err := configRepo(env).Commit(ctx, message, "flake.lock"); err != nil {
@@ -90,19 +94,12 @@ func lockSecrets(ctx context.Context, env *pipeline.Env) error {
 	return configRepo(env).Push(ctx)
 }
 
-// flakeInputOutdated asks for 3.1 again when no config revision is recorded
-// or the config does not lock the recorded nix-secrets commit, as after 2.4
-// ran again and recorded a new one.
+// flakeInputOutdated asks for 3.1 again when no config revision is recorded.
+// A config that no longer locks SecretsCommit reopens 2.4 first
+// (commitPushOutdated), and so 3.1.
 func flakeInputOutdated(_ context.Context, env *pipeline.Env) (string, error) {
 	if env.State.ConfigRev == "" {
 		return "no config revision is recorded", nil
-	}
-	rev, err := configFlake(env).LockedRev(secretsInput)
-	if err != nil {
-		return "", err
-	}
-	if rev != env.State.SecretsCommit {
-		return fmt.Sprintf("the config locks nix-secrets at %.7s, not at %.7s", rev, env.State.SecretsCommit), nil
 	}
 	return "", nil
 }

@@ -22,9 +22,9 @@ import (
 // target) and loads the persisted state of the chosen host, since state is
 // keyed by host name. The target is asked last: how to prepare it is shown
 // until the base install is done, which is known once the state is loaded,
-// and on a reinstall. With in.Reinstall the state is deleted only once every
-// input is complete, so an aborted prompt deletes nothing. in is completed in
-// place.
+// and on a reinstall. With in.Reinstall the state starts fresh, but what is
+// saved for the host is only replaced once 0.1 has the wipe confirmed
+// (pipeline.Env.ConfirmReinstall). in is completed in place.
 func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*pipeline.State, error) {
 	var st *pipeline.State
 	err := runner.Run(ctx, "Checking inputs", func(ctx context.Context) error {
@@ -46,7 +46,11 @@ func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*
 		}
 		in.ConfigDir, in.SecretsDir, in.Host = configDir, secretsDir, host
 
-		st, err = pipeline.LoadState(stateDir, host)
+		if in.Reinstall {
+			st, err = pipeline.StartReinstall(stateDir, host)
+		} else {
+			st, err = pipeline.LoadState(stateDir, host)
+		}
 		if err != nil {
 			return err
 		}
@@ -61,13 +65,7 @@ func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*
 		}
 		in.Target = target
 		if in.Reinstall {
-			if err := pipeline.RemoveState(stateDir, host); err != nil {
-				return err
-			}
-			runner.Info(ctx, "Deleted the saved state and pinned host key of "+host)
-			if st, err = pipeline.LoadState(stateDir, host); err != nil {
-				return err
-			}
+			runner.Info(ctx, "Reinstall: the saved state and pinned host key of "+host+" are replaced once the wipe is confirmed in 0.1")
 		}
 		runner.Info(ctx, "Target: "+target)
 		runner.Info(ctx, "Host: "+host)

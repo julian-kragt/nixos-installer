@@ -391,3 +391,46 @@ func TestLiteralRecipientsInARuleStay(t *testing.T) {
 		}
 	}
 }
+
+// A new rule that goes before a rule matching its file takes that file from
+// it, so it is listed; a catch-all without path_regex is not.
+func TestInsertions(t *testing.T) {
+	const keys = "keys:\n  - &admin age1admin\ncreation_rules:\n"
+	const unescaped = "  - path_regex: ^hosts/atlas.yaml$\n    key_groups:\n      - age:\n          - *admin\n"
+	const userGlob = "  - path_regex: ^host-users/atlas-.*\\.yaml$\n    key_groups:\n      - age:\n          - *admin\n"
+	const own = "  - path_regex: ^hosts/atlas\\.yaml$\n    key_groups:\n      - age:\n          - *admin\n"
+	const noRegex = "  - key_groups:\n      - age:\n          - *admin\n"
+	h := Host{Name: "atlas", Recipient: "age1atlas", Users: map[string]string{"jkragt": "age1jkragt"}}
+	tests := []struct {
+		name, rules string
+		want        []Inserted
+	}{
+		{"differently written rule", unescaped, []Inserted{{HostFile("atlas"), "^hosts/atlas.yaml$"}}},
+		{"rule for every user file", userGlob, []Inserted{{UserFile("atlas", "jkragt"), `^host-users/atlas-.*\.yaml$`}}},
+		{"own rule", own, nil},
+		{"catch-all", noRegex, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, err := ParseConfig([]byte(keys + tt.rules))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := c.Insertions(h)
+			if err != nil || !slices.Equal(got, tt.want) {
+				t.Errorf("insertions = %+v, %v, want %+v", got, err, tt.want)
+			}
+		})
+	}
+}
+
+// A broken path_regex is reported before Apply would add a rule past it.
+func TestInsertionsReportsABrokenRegex(t *testing.T) {
+	c, err := ParseConfig([]byte("creation_rules:\n  - path_regex: ^hosts/(\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Insertions(Host{Name: "atlas", Recipient: "age1atlas"}); err == nil || !strings.Contains(err.Error(), "path_regex") {
+		t.Errorf("err = %v, want the broken path_regex named", err)
+	}
+}

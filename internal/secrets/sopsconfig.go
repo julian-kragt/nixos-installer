@@ -109,7 +109,7 @@ func (c *Config) Replacements(h Host) []Replaced {
 // that a rule of another host still uses stays. sops uses the first rule that
 // matches a file: a missing rule is added before the first rule that matches
 // its file, but check with Shadowed first that no rule comes before an
-// existing one.
+// existing one, and with Insertions which rules a new one goes before.
 func (c *Config) Apply(h Host) []string {
 	for _, a := range h.anchors() {
 		c.setKey(a.name, a.recipient)
@@ -131,6 +131,39 @@ func (c *Config) Apply(h Host) []string {
 		removed = append(removed, u)
 	}
 	return removed
+}
+
+// Inserted is a rule Apply adds for File before Before, the path_regex of a
+// rule that matches File: sops then uses the new rule, with only the host's
+// recipients, where it used Before.
+type Inserted struct{ File, Before string }
+
+func (i Inserted) String() string {
+	return fmt.Sprintf("%s: %s goes before path_regex %s, which sops uses for it until now", i.File, FileRule(i.File), i.Before)
+}
+
+// Insertions lists the rules Apply would add before an existing rule with a
+// path_regex that matches their file, in the order of h's files. A rule
+// without path_regex, a catch-all, is not listed. A path_regex that does not
+// compile is an error, so it is reported before anything changes.
+func (c *Config) Insertions(h Host) ([]Inserted, error) {
+	var out []Inserted
+	for _, file := range Files(h.Name, slices.Sorted(maps.Keys(h.Users))) {
+		if c.HasRule(file) {
+			continue
+		}
+		rule, _, err := c.firstRule(file)
+		if err != nil {
+			return nil, err
+		}
+		if rule == nil {
+			continue
+		}
+		if v := value(rule, "path_regex"); v != nil {
+			out = append(out, Inserted{File: file, Before: v.Value})
+		}
+	}
+	return out, nil
 }
 
 // Shadow is a file that sops would encrypt with another rule than its own,
@@ -267,7 +300,7 @@ func (c *Config) setRule(file string, anchors ...string) {
 	setValue(rule, "path_regex", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: regex})
 	setValue(rule, "key_groups", keyGroups(anchors, nil))
 	rules := c.seq("creation_rules")
-	// The rules were matched by Shadowed or Recipients before, so a broken
+	// Insertions matched this file against the rules before, so a broken
 	// regex was reported there; here it only counts as no match.
 	at := slices.IndexFunc(rules.Content, func(r *yaml.Node) bool {
 		ok, err := matches(r, file)

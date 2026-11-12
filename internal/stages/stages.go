@@ -25,6 +25,11 @@ const (
 	stageFlakeInput    = "3.1"
 )
 
+// secretsStages are the stages that write the clone and push it, which 2.5
+// opens again when the pushed commit is not as it should be. They start at
+// 2.1, so the clone is checked before it is pushed again.
+var secretsStages = []string{"2.1", stageRecipients, "2.3", stageCommitPush}
+
 // BaseInstalled reports whether st records the base install: until then the
 // target is to run the NixOS ISO, prepared as the instructions say.
 func BaseInstalled(st *pipeline.State) bool { return st.IsCompleted(stageBaseInstall) }
@@ -38,7 +43,7 @@ var All = []pipeline.Stage{
 	{ID: "1.2", Name: "Host identity", Run: hostIdentity, Outdated: hostIdentityOutdated},
 	{ID: "1.3", Name: "User identity", Run: userIdentity, Outdated: userIdentityOutdated},
 	{ID: "2.1", Name: "Secrets repository", Run: secretsRepository},
-	{ID: stageRecipients, Name: "Recipients", Run: recipients, Outdated: recipientsOutdated},
+	{ID: stageRecipients, Name: "Recipients", Run: recipients},
 	{ID: "2.3", Name: "Template authoring", Run: templateAuthoring},
 	{ID: stageCommitPush, Name: "Commit and push", Run: commitPush, Outdated: commitPushOutdated},
 	{ID: stagePushedSecrets, Name: "Pushed secrets", Run: pushedSecrets},

@@ -242,15 +242,25 @@ func hasPlain(n *yaml.Node) bool {
 	return false
 }
 
+// ShapeProblem is the part of StaticProblem that needs no recipients: it says
+// why a secret file does not exist with only encrypted values, or "" when it
+// does. ciphertext is nil for a missing file.
+func ShapeProblem(ciphertext []byte) string {
+	if ciphertext == nil {
+		return "missing"
+	}
+	if err := CheckCiphertext(ciphertext); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 // StaticProblem is the part of Problem that needs no key: it says why a secret
 // file is not one encrypted to exactly want, or "" when it is. ciphertext is
 // nil for a missing file.
 func StaticProblem(ciphertext []byte, want []string) (string, error) {
-	if ciphertext == nil {
-		return "missing", nil
-	}
-	if err := CheckCiphertext(ciphertext); err != nil {
-		return err.Error(), nil
+	if problem := ShapeProblem(ciphertext); problem != "" {
+		return problem, nil
 	}
 	have, err := Recipients(ciphertext)
 	if err != nil {

@@ -18,7 +18,8 @@ import (
 // recipients makes the nix-secrets clone's .sops.yaml say exactly who decrypts
 // the host's files: the host, and each user's own key on it. Files of users who
 // are no longer on the host are deleted; 2.4 commits that. It changes nothing
-// while a rule comes before one of the host's files' own rule.
+// while a rule comes before one of the host's files' own rule, and asks before
+// a new rule goes before one that matched its file.
 func recipients(ctx context.Context, env *pipeline.Env) error {
 	users, err := hostUsers(ctx, env)
 	if err != nil {
@@ -45,8 +46,15 @@ func recipients(ctx context.Context, env *pipeline.Env) error {
 	if err := checkRuleOrder(env, cfg, users); err != nil {
 		return err
 	}
+	inserted, err := cfg.Insertions(want)
+	if err != nil {
+		return err
+	}
 	stale, err := secrets.Stale(env.SecretsDir, env.Host, users)
 	if err != nil {
+		return err
+	}
+	if err := confirmInsertions(ctx, inserted); err != nil {
 		return err
 	}
 	if err := confirmReplacements(ctx, cfg.Replacements(want)); err != nil {
@@ -75,16 +83,6 @@ func recipients(ctx context.Context, env *pipeline.Env) error {
 	return nil
 }
 
-// recipientsOutdated asks for 2.2 again, and so 2.3 to 2.5, when 2.4 pushed a
-// commit that 2.5 did not pass: those stages fix what they can in the clone,
-// push it and check again.
-func recipientsOutdated(_ context.Context, env *pipeline.Env) (string, error) {
-	if env.State.IsCompleted(stageCommitPush) && !env.State.IsCompleted(stagePushedSecrets) {
-		return fmt.Sprintf("the pushed nix-secrets commit %.7s has not passed stage %s", env.State.SecretsCommit, stagePushedSecrets), nil
-	}
-	return "", nil
-}
-
 // checkRuleOrder fails unless each of the host's files that has a rule of its
 // own is encrypted with it: sops uses the first rule that matches a file, and
 // a broader one before it would give the file other recipients. A file
@@ -103,6 +101,23 @@ func checkRuleOrder(env *pipeline.Env, cfg *secrets.Config, users []string) erro
 	return fmt.Errorf("%s has rules that come before a secret file's own rule:\n%s\n"+
 		"sops uses the first rule that matches a file; put each file's own rule first in %s, then run the installer again",
 		secrets.ConfigFile, strings.Join(lines, "\n"), filepath.Join(env.SecretsDir, secrets.ConfigFile))
+}
+
+// confirmInsertions shows the rules that go before a rule that matched their
+// file until now, and requires the operator to type "add": the file gets only
+// the host's recipients, not those of that rule.
+func confirmInsertions(ctx context.Context, inserted []secrets.Inserted) error {
+	if len(inserted) == 0 {
+		return nil
+	}
+	for _, i := range inserted {
+		runner.Info(ctx, i.String())
+	}
+	runner.Info(ctx, "Each of these files gets only the recipients of its new rule; to keep another rule's, give it the file's own path_regex "+
+		"and the installer keeps its literal recipients")
+	return runner.RequireTyped(ctx, "Type 'add' to add these rules: ", "add",
+		errors.New("confirmation required: run the installer in a terminal"),
+		errors.New("aborted: "+secrets.ConfigFile+" was not changed"))
 }
 
 // confirmReplacements shows the recipients that change and requires the

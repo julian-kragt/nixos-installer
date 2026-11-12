@@ -18,8 +18,10 @@ import (
 // locks the commit into the config, so a bad commit is never deployed. The
 // commit must be on the remote, and hold exactly the host's files for the
 // users of the config, each encrypted to the recipients of its own rule.
-// Nothing is decrypted. It reports every problem, then fails; the next run
-// repeats 2.2 to 2.4 first (recipientsOutdated), which rewrite what they can.
+// Nothing is decrypted. It reports every problem, then reopens 2.1 to 2.4 and
+// fails: the next run checks the clone again and rewrites what it can. An
+// error that is not a problem of the commit, as a failed fetch, reopens
+// nothing, so the next run only checks again.
 func pushedSecrets(ctx context.Context, env *pipeline.Env) error {
 	commit := env.State.SecretsCommit
 	if commit == "" {
@@ -38,10 +40,13 @@ func pushedSecrets(ctx context.Context, env *pipeline.Env) error {
 		return err
 	}
 	if len(problems) > 0 {
+		if err := env.State.Reopen(secretsStages...); err != nil {
+			return fmt.Errorf("persist state: %w", err)
+		}
 		return fmt.Errorf("nix-secrets at %.7s does not hold %s's secrets as it should:\n  %s\n"+
 			"the next run repeats stages %s to %s, which fix the clone at %s and push it again; "+
 			"fix by hand what they cannot, then run the installer again",
-			commit, env.Host, strings.Join(problems, "\n  "), stageRecipients, stagePushedSecrets, env.SecretsDir)
+			commit, env.Host, strings.Join(problems, "\n  "), secretsStages[0], stagePushedSecrets, env.SecretsDir)
 	}
 	runner.Info(ctx, fmt.Sprintf("nix-secrets at %.7s holds %s's secrets as it should", commit, env.Host))
 	return nil
@@ -53,10 +58,11 @@ func pushedSecrets(ctx context.Context, env *pipeline.Env) error {
 func pushedProblems(ctx context.Context, env *pipeline.Env, commit string, users []string) ([]string, error) {
 	repo := secretsRepo(env)
 	var problems []string
-	switch pushed, err := repo.OnUpstream(ctx, commit); {
-	case err != nil:
-		problems = append(problems, err.Error())
-	case !pushed:
+	pushed, err := repo.OnUpstream(ctx, commit)
+	if err != nil {
+		return nil, err
+	}
+	if !pushed {
 		problems = append(problems, fmt.Sprintf("%.7s is not on the upstream of %s", commit, env.SecretsDir))
 	}
 
@@ -121,13 +127,7 @@ func fileProblemAt(cfg *secrets.Config, file string, ciphertext []byte) (string,
 		want, recipientsErr = cfg.Recipients(file)
 	}
 	if cfg == nil || recipientsErr != nil {
-		if ciphertext == nil {
-			return joinProblems("missing", recipientsErr), nil
-		}
-		if err := sops.CheckCiphertext(ciphertext); err != nil {
-			return joinProblems(err.Error(), recipientsErr), nil
-		}
-		return joinProblems("", recipientsErr), nil
+		return joinProblems(sops.ShapeProblem(ciphertext), recipientsErr), nil
 	}
 	return sops.StaticProblem(ciphertext, want)
 }

@@ -75,9 +75,10 @@ printf '%s' '{"users":{"jkragt":{"uid":1000,"home":"/home/jkragt"}}}'
 
 	env := &pipeline.Env{
 		Inputs: pipeline.Inputs{Host: "atlas", ConfigDir: t.TempDir(), SecretsDir: dir},
-		State:  &pipeline.State{Host: "atlas", HostRecipient: "age1atlas", UserRecipients: map[string]string{"jkragt": "age1jkragt"}},
+		State:  pipeline.NewState(t.TempDir(), "atlas"),
 		Local:  machine.Local(),
 	}
+	env.State.HostRecipient, env.State.UserRecipients = "age1atlas", map[string]string{"jkragt": "age1jkragt"}
 	return env, remote
 }
 
@@ -233,6 +234,29 @@ func TestRecipientsAddsRulesBeforeACatchAll(t *testing.T) {
 	}
 }
 
+// A new rule that would take a file from an operator's rule, here one with an
+// unescaped dot, is not added without a typed confirmation; nor is anything
+// when a path_regex does not compile.
+func TestRecipientsAsksBeforeTakingAFileFromAnotherRule(t *testing.T) {
+	for name, tt := range map[string]struct{ rule, wantErr string }{
+		"differently written rule": {"  - path_regex: ^hosts/atlas.yaml$\n    key_groups:\n      - age:\n          - *host_other\n", "confirmation required"},
+		"broken path_regex":        {"  - path_regex: ^hosts/(\n    key_groups:\n      - age:\n          - *host_other\n", "path_regex"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env, _ := secretsEnv(t)
+			config := "keys:\n  - &host_other age1other\ncreation_rules:\n" + tt.rule
+			put(t, env.SecretsDir, ".sops.yaml", config)
+			err := recipients(context.Background(), env)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v, want %q in it", err, tt.wantErr)
+			}
+			if after, _ := os.ReadFile(filepath.Join(env.SecretsDir, ".sops.yaml")); string(after) != config {
+				t.Errorf(".sops.yaml changed:\n%s", after)
+			}
+		})
+	}
+}
+
 func TestSecretsRepositoryRefusesUnrelatedChanges(t *testing.T) {
 	env, _ := secretsEnv(t)
 	put(t, env.SecretsDir, "host-users/other-jkragt.yaml", "changed")
@@ -379,36 +403,44 @@ func TestPushedSecretsReportsEveryProblem(t *testing.T) {
 	}
 }
 
-func TestPushedSecretsReportsAMissingUpstream(t *testing.T) {
+// An error that is not a problem of the commit reopens nothing: the next run
+// only runs 2.5 again.
+func TestPushedSecretsFailsWithoutAnUpstreamAndReopensNothing(t *testing.T) {
 	env := pushedEnv(t)
+	env.State.Completed = []string{"2.1", "2.2", "2.3", "2.4"}
 	gitIn(t, env.SecretsDir, "branch", "--unset-upstream")
 	err := pushedSecrets(context.Background(), env)
 	if err == nil || !strings.Contains(err.Error(), "on the upstream") {
 		t.Fatalf("err = %v, want the upstream check reported", err)
 	}
-	if !strings.Contains(err.Error(), "the next run repeats stages 2.2 to 2.5") {
-		t.Errorf("err = %v, want the way forward", err)
+	if strings.Contains(err.Error(), "the next run repeats") {
+		t.Errorf("err = %v, want no repeated stages", err)
+	}
+	if got := strings.Join(env.State.Completed, ","); got != "2.1,2.2,2.3,2.4" {
+		t.Errorf("completed = %s, want 2.1 to 2.4 kept", got)
 	}
 }
 
-// A failed 2.5 makes the next run repeat 2.2 to 2.5 against a new commit.
-func TestRecipientsOutdatedUntilThePushedSecretsPass(t *testing.T) {
-	tests := []struct {
-		name       string
-		completed  []string
-		wantReason bool
-	}{
-		{"secrets phase running", []string{"2.1", "2.2", "2.3"}, false},
-		{"2.5 failed", []string{"2.1", "2.2", "2.3", "2.4"}, true},
-		{"2.5 passed", []string{"2.1", "2.2", "2.3", "2.4", "2.5"}, false},
+// A commit with a problem reopens 2.1 to 2.4, so the next run checks the
+// clone, fixes it and pushes again; earlier stages stay done.
+func TestPushedSecretsReopensTheSecretsPhase(t *testing.T) {
+	env := pushedEnv(t)
+	env.State.Completed = []string{"1.3", "2.1", "2.2", "2.3", "2.4"}
+	dir := env.SecretsDir
+	put(t, dir, "hosts/atlas.yaml", "hashedPassword: plain\n")
+	gitIn(t, dir, "commit", "-q", "-am", "plain")
+	gitIn(t, dir, "push", "-q")
+	env.State.SecretsCommit = gitIn(t, dir, "rev-parse", "HEAD")
+
+	err := pushedSecrets(context.Background(), env)
+	if err == nil || !strings.Contains(err.Error(), "the next run repeats stages 2.1 to 2.5") {
+		t.Fatalf("err = %v, want the way forward", err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			env := &pipeline.Env{State: &pipeline.State{Completed: tt.completed, SecretsCommit: secretsCommit}}
-			reason, err := recipientsOutdated(context.Background(), env)
-			if err != nil || (reason != "") != tt.wantReason {
-				t.Errorf("reason = %q, %v, want one: %v", reason, err, tt.wantReason)
-			}
-		})
+	saved, err := pipeline.LoadState(filepath.Dir(env.State.Path()), "atlas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(saved.Completed, ","); got != "1.3" {
+		t.Errorf("saved completed = %s, want 1.3", got)
 	}
 }

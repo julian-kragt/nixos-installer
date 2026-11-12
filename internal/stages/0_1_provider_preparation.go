@@ -20,7 +20,8 @@ import (
 
 // providerPreparation makes sure everything is in place before the target is
 // wiped, gets the operator's confirmation and has the operator type the LUKS
-// passphrase at the target's console. Besides the console helper, it only
+// passphrase at the target's console. On a reinstall, what is saved for the
+// host is replaced only then. Besides the console helper, it only
 // reads from the target. A host without a hardware config gets one here,
 // because nothing about the host can be read until it exists.
 func providerPreparation(ctx context.Context, env *pipeline.Env) error {
@@ -73,9 +74,20 @@ func providerPreparation(ctx context.Context, env *pipeline.Env) error {
 	if err := confirmInstall(ctx, env.Remote, env.Host, info.Disks); err != nil {
 		return err
 	}
-	return runner.Run(ctx, "LUKS passphrase at the console", func(ctx context.Context) error {
+	err = runner.Run(ctx, "LUKS passphrase at the console", func(ctx context.Context) error {
 		return luks.Ask(ctx, session)
 	})
+	if err != nil {
+		return err
+	}
+	// Only now, with the wipe confirmed, is what is saved for the host replaced.
+	if env.Reinstall {
+		if err := env.ConfirmReinstall(); err != nil {
+			return err
+		}
+		runner.Info(ctx, "Deleted the saved state and pinned host key of "+env.Host)
+	}
+	return nil
 }
 
 // checkBootstrapKeys fails when none of the provider's agent keys is among
