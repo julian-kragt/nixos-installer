@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - name: Build and test
+        # Builds both packages; the Go tests run in the nixos-installer build.
+        run: nix flake check -L
+      - name: Lint
+        run: |
+          nix develop -c sh -c '
+            unformatted=$(gofmt -l .)
+            if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi
+            go vet ./...
+            staticcheck ./...
+          '
+      - name: Nix formatting
+        run: nix fmt -- --check flake.nix

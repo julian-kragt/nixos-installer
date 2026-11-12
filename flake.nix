@@ -1,5 +1,5 @@
 {
-  description = "nixos-installer: provisions a NixOS host from the config flake";
+  description = "Installs a NixOS host from its config flake, with secrets typed at the target's console";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
@@ -98,7 +98,12 @@
                 --set NIXOS_INSTALLER_CONSOLE ${consoleHelpers}
             '';
 
-            meta.mainProgram = "nixos-installer";
+            meta = {
+              description = "Installs a NixOS host from its config flake, with secrets typed at the target's console";
+              homepage = "https://github.com/julian-kragt/nixos-installer";
+              license = pkgs.lib.licenses.mit;
+              mainProgram = "nixos-installer";
+            };
           };
         }
       );
@@ -113,6 +118,10 @@
             pkgs.go_1_27
             pkgs.gopls
             pkgs.gotools
+            # staticcheck, built with the Go that go.mod requires so it can load the packages.
+            (pkgs.go-tools.override {
+              buildGoModule = pkgs.buildGoModule.override { go = pkgs.go_1_27; };
+            })
             pkgs.openssh
             pkgs.git
             pkgs.sops
