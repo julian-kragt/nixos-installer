@@ -12,18 +12,21 @@ import (
 	"installer/internal/commands/hardwareconfig"
 	"installer/internal/commands/luks"
 	"installer/internal/commands/nix"
+	"installer/internal/console"
 	"installer/internal/machine"
 	"installer/internal/pipeline"
 	"installer/internal/runner"
 )
 
 // providerPreparation makes sure everything is in place before the target is
-// wiped, gets the operator's confirmation and delivers the LUKS passphrase. It
-// only reads from the target. A host without a hardware config gets one here,
+// wiped, gets the operator's confirmation and has the operator type the LUKS
+// passphrase at the target's console. Besides the console helper, it only
+// reads from the target. A host without a hardware config gets one here,
 // because nothing about the host can be read until it exists.
 func providerPreparation(ctx context.Context, env *pipeline.Env) error {
 	var hardwareConfigPath string
 	var info nix.HostInfo
+	var session console.Session
 	err := runner.RunSteps(ctx,
 		runner.Step{Title: "Find hardware config", Fn: func(ctx context.Context) (err error) {
 			hardwareConfigPath, err = configFlake(env).HardwareConfigPath(ctx, env.Host)
@@ -58,6 +61,10 @@ func providerPreparation(ctx context.Context, env *pipeline.Env) error {
 		runner.Step{Title: "Check target", Fn: func(ctx context.Context) error {
 			return checkTarget(ctx, env.Remote)
 		}},
+		runner.Step{Title: "Install console helper", Fn: func(ctx context.Context) (err error) {
+			session, err = console.Prepare(ctx, env.Local, env.Remote, env.Host, info.System)
+			return err
+		}},
 	)
 	if err != nil {
 		return err
@@ -66,8 +73,8 @@ func providerPreparation(ctx context.Context, env *pipeline.Env) error {
 	if err := confirmInstall(ctx, env.Remote, env.Host, info.Disks); err != nil {
 		return err
 	}
-	return runner.Run(ctx, "Deliver LUKS passphrase", func(ctx context.Context) error {
-		return luks.AskAndSend(ctx, env.Remote)
+	return runner.Run(ctx, "LUKS passphrase at the console", func(ctx context.Context) error {
+		return luks.Ask(ctx, session)
 	})
 }
 

@@ -20,16 +20,54 @@
         let
           # go.mod requires Go 1.27; the default `go` in nixpkgs may lag behind.
           buildGoModule = pkgs.buildGoModule.override { go = pkgs.go_1_27; };
+          version = self.shortRev or self.dirtyShortRev or "dev";
+          vendorHash = "sha256-+BWPX4u+EBCABeyjszTew6WmKBfrRhhA5TnatJVkPTU=";
+
+          # The console helper runs on the target, so it is built for Linux
+          # from whatever system the installer runs on: pure Go, static, no
+          # cross toolchain needed. go install puts a cross build in bin/linux_<arch>.
+          consoleHelper =
+            arch:
+            buildGoModule {
+              pname = "nixos-installer-console";
+              inherit version vendorHash;
+              src = self;
+              subPackages = [ "cmd/nixos-installer-console" ];
+              preBuild = ''
+                export GOOS=linux GOARCH=${arch} CGO_ENABLED=0
+              '';
+              postInstall = ''
+                if [ -d $out/bin/linux_${arch} ]; then
+                  mv $out/bin/linux_${arch}/* $out/bin/
+                  rmdir $out/bin/linux_${arch}
+                fi
+              '';
+              # The tests ran for the installer; the host's tools cannot touch a Linux binary.
+              doCheck = false;
+              dontFixup = true;
+            };
+
+          # <system>/nixos-installer-console for each system a host can have.
+          consoleHelpers = pkgs.linkFarm "nixos-installer-console" [
+            {
+              name = "x86_64-linux/nixos-installer-console";
+              path = "${consoleHelper "amd64"}/bin/nixos-installer-console";
+            }
+            {
+              name = "aarch64-linux/nixos-installer-console";
+              path = "${consoleHelper "arm64"}/bin/nixos-installer-console";
+            }
+          ];
         in
         {
           default = self.packages.${pkgs.stdenv.hostPlatform.system}.nixos-installer;
 
+          nixos-installer-console = consoleHelpers;
+
           nixos-installer = buildGoModule {
             pname = "nixos-installer";
-            version = self.shortRev or self.dirtyShortRev or "dev";
+            inherit version vendorHash;
             src = self;
-
-            vendorHash = "sha256-+BWPX4u+EBCABeyjszTew6WmKBfrRhhA5TnatJVkPTU=";
 
             nativeBuildInputs = [ pkgs.makeWrapper ];
 
@@ -44,20 +82,20 @@
               pkgs.age
             ];
 
-            # ssh, git, and for the secrets phase sops, mkpasswd and vim, are
-            # shelled out to at runtime. nix itself is taken from the operator's PATH so
-            # it matches their daemon.
+            # ssh and git are shelled out to at runtime; sops, mkpasswd and vim
+            # run on the target, in the console helper. nix itself is taken from
+            # the operator's PATH so it matches their daemon.
             postInstall = ''
+              # Built for this system with the rest; the one for the target is in consoleHelpers.
+              rm $out/bin/nixos-installer-console
               wrapProgram $out/bin/nixos-installer \
                 --suffix PATH : ${
                   pkgs.lib.makeBinPath [
                     pkgs.openssh
                     pkgs.git
-                    pkgs.sops
-                    pkgs.mkpasswd
-                    pkgs.vim
                   ]
-                }
+                } \
+                --set NIXOS_INSTALLER_CONSOLE ${consoleHelpers}
             '';
 
             meta.mainProgram = "nixos-installer";

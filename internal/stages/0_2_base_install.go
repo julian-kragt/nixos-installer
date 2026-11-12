@@ -8,6 +8,7 @@ import (
 	"installer/internal/commands/luks"
 	"installer/internal/commands/nix"
 	"installer/internal/commands/nixosanywhere"
+	"installer/internal/console"
 	"installer/internal/machine"
 	"installer/internal/pipeline"
 	"installer/internal/runner"
@@ -41,7 +42,7 @@ func baseInstall(ctx context.Context, env *pipeline.Env) error {
 	case nixosanywhere.TargetInstalled:
 		runner.Info(ctx, fmt.Sprintf("The target already runs %s; boot the NixOS ISO to install it again", env.Host))
 	case nixosanywhere.TargetISO:
-		if err := installFromISO(ctx, env, info.HardwareConfigPath); err != nil {
+		if err := installFromISO(ctx, env, info); err != nil {
 			return err
 		}
 	default:
@@ -60,18 +61,33 @@ func baseInstall(ctx context.Context, env *pipeline.Env) error {
 }
 
 // installFromISO runs nixos-anywhere on the ISO and waits for the first boot.
-func installFromISO(ctx context.Context, env *pipeline.Env, hardwareConfigPath string) error {
+func installFromISO(ctx context.Context, env *pipeline.Env, info nix.HostInfo) error {
 	return runner.RunSteps(ctx,
 		runner.Step{Title: "Check LUKS passphrase", Fn: func(ctx context.Context) error {
-			return luks.Ensure(ctx, env.Remote)
+			return ensurePassphrase(ctx, env, info.System)
 		}},
 		runner.Step{Title: "Run nixos-anywhere", Fn: func(ctx context.Context) error {
-			return nixosanywhere.Install(ctx, configRepo(env), env.Host, env.Target, hardwareConfigPath)
+			return nixosanywhere.Install(ctx, configRepo(env), env.Host, env.Target, info.HardwareConfigPath)
 		}},
 		runner.Step{Title: "Wait for the installed system", Fn: func(ctx context.Context) error {
 			return awaitInstalledSystem(ctx, env)
 		}},
 	)
+}
+
+// ensurePassphrase has the operator type the LUKS passphrase at the console
+// again when it is not on the ISO any more, as after a reboot, which also
+// removed the console helper.
+func ensurePassphrase(ctx context.Context, env *pipeline.Env, system string) error {
+	present, err := luks.Present(ctx, env.Remote)
+	if err != nil || present {
+		return err
+	}
+	session, err := console.Prepare(ctx, env.Local, env.Remote, env.Host, system)
+	if err != nil {
+		return err
+	}
+	return luks.Ask(ctx, session)
 }
 
 // awaitInstalledSystem waits for the first boot, pins the new host key and
