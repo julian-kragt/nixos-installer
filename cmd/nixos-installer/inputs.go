@@ -15,14 +15,16 @@ import (
 	"installer/internal/machine"
 	"installer/internal/pipeline"
 	"installer/internal/runner"
+	"installer/internal/stages"
 )
 
 // resolveInputs asks for whatever the flags left empty (config, secrets, host,
 // target) and loads the persisted state of the chosen host, since state is
-// keyed by host name, after deleting it when in.Reinstall is set. The target
-// is asked last: how to prepare it is shown only to a host that has no
-// completed stage yet, which is known once its state is loaded. in is
-// completed in place.
+// keyed by host name. The target is asked last: how to prepare it is shown
+// until the base install is done, which is known once the state is loaded,
+// and on a reinstall. With in.Reinstall the state is deleted only once every
+// input is complete, so an aborted prompt deletes nothing. in is completed in
+// place.
 func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*pipeline.State, error) {
 	var st *pipeline.State
 	err := runner.Run(ctx, "Checking inputs", func(ctx context.Context) error {
@@ -44,17 +46,11 @@ func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*
 		}
 		in.ConfigDir, in.SecretsDir, in.Host = configDir, secretsDir, host
 
-		if in.Reinstall {
-			if err := pipeline.RemoveState(stateDir, host); err != nil {
-				return err
-			}
-			runner.Info(ctx, "Deleted the saved state and pinned host key of "+host)
-		}
 		st, err = pipeline.LoadState(stateDir, host)
 		if err != nil {
 			return err
 		}
-		if len(st.Completed) == 0 {
+		if in.Reinstall || !stages.BaseInstalled(st) {
 			if err := showInstructions(ctx); err != nil {
 				return err
 			}
@@ -64,6 +60,15 @@ func resolveInputs(ctx context.Context, in *pipeline.Inputs, stateDir string) (*
 			return err
 		}
 		in.Target = target
+		if in.Reinstall {
+			if err := pipeline.RemoveState(stateDir, host); err != nil {
+				return err
+			}
+			runner.Info(ctx, "Deleted the saved state and pinned host key of "+host)
+			if st, err = pipeline.LoadState(stateDir, host); err != nil {
+				return err
+			}
+		}
 		runner.Info(ctx, "Target: "+target)
 		runner.Info(ctx, "Host: "+host)
 		return nil

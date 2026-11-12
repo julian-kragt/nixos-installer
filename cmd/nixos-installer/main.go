@@ -37,6 +37,7 @@ func run() int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
 	}
+	flags.SSHPassword = takeSSHPassword()
 
 	stateDir := defaultStateDir()
 	runnerOpts := runner.Options{Out: os.Stderr, In: os.Stdin, Verbose: flags.verbose}

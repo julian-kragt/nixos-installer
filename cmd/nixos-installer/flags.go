@@ -5,9 +5,15 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+	"os"
 
 	"installer/internal/pipeline"
 )
+
+// sshPasswordEnv holds the ISO's root password for a run that cannot be asked.
+// It is not a flag: a command line is visible to every user in ps and is kept
+// in the shell's history.
+const sshPasswordEnv = "NIXOS_INSTALLER_SSH_PASSWORD"
 
 // options are the command-line inputs. Empty inputs are completed by
 // resolveInputs.
@@ -27,9 +33,13 @@ func parseFlags(args []string, stderr io.Writer) (options, error) {
 	fs.StringVar(&o.SecretsDir, "secrets", "", "Path to the nix-secrets repository (prompts when empty)")
 	fs.StringVar(&o.Host, "host", "", "Host to install (prompts when empty)")
 	fs.StringVar(&o.Target, "target", "", "IP address of the target device (prompts when empty)")
-	fs.StringVar(&o.SSHPassword, "ssh-password", "", "Root SSH password of the NixOS ISO for the initial key bootstrap (prompts when empty)")
 	fs.BoolVar(&o.Reinstall, "reinstall", false, "Delete the host's saved state and pinned host key first, to install it again from the NixOS ISO")
 	fs.BoolVar(&o.GenerateHardware, "generate-hardware", false, "Generate a missing hardware config from the target without asking")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "Usage of nixos-installer:")
+		fs.PrintDefaults()
+		fmt.Fprintf(fs.Output(), "\nEnvironment:\n  %s\n    \tRoot SSH password of the NixOS ISO for the initial key bootstrap (prompts when unset)\n", sshPasswordEnv)
+	}
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}
@@ -39,6 +49,14 @@ func parseFlags(args []string, stderr io.Writer) (options, error) {
 		}
 	}
 	return o, nil
+}
+
+// takeSSHPassword returns the password in sshPasswordEnv and removes it from
+// the environment, so no command the installer runs inherits it.
+func takeSSHPassword() string {
+	pw := os.Getenv(sshPasswordEnv)
+	os.Unsetenv(sshPasswordEnv)
+	return pw
 }
 
 func validateTarget(s string) error {

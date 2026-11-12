@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 )
@@ -40,5 +41,19 @@ func TestParseFlags(t *testing.T) {
 	}
 	if _, err := parseFlags([]string{"--target", "fe80::1"}, &buf); err == nil || !strings.Contains(err.Error(), "zone") {
 		t.Fatalf("link-local without zone should ask for a zone, got %v", err)
+	}
+}
+
+func TestSSHPasswordComesFromTheEnvironmentOnly(t *testing.T) {
+	var buf bytes.Buffer
+	if _, err := parseFlags([]string{"--ssh-password", "x"}, &buf); err == nil {
+		t.Error("--ssh-password is accepted; it would show the password in ps")
+	}
+	t.Setenv(sshPasswordEnv, "secret")
+	if pw := takeSSHPassword(); pw != "secret" {
+		t.Errorf("password = %q", pw)
+	}
+	if _, set := os.LookupEnv(sshPasswordEnv); set {
+		t.Error("the password is still in the environment")
 	}
 }

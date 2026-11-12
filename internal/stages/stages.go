@@ -25,6 +25,10 @@ const (
 	stageFlakeInput    = "3.1"
 )
 
+// BaseInstalled reports whether st records the base install: until then the
+// target is to run the NixOS ISO, prepared as the instructions say.
+func BaseInstalled(st *pipeline.State) bool { return st.IsCompleted(stageBaseInstall) }
+
 // All is the pipeline: the stages in the order they run.
 var All = []pipeline.Stage{
 	{ID: "0.0", Name: "Environment preparation", Always: true, Run: environmentPreparation},
