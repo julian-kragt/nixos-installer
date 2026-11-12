@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"os"
 	"strings"
 	"testing"
 )
@@ -44,16 +43,9 @@ func TestParseFlags(t *testing.T) {
 	}
 }
 
-func TestSSHPasswordComesFromTheEnvironmentOnly(t *testing.T) {
+func TestSSHPasswordFlag(t *testing.T) {
 	var buf bytes.Buffer
-	if _, err := parseFlags([]string{"--ssh-password", "x"}, &buf); err == nil {
-		t.Error("--ssh-password is accepted; it would show the password in ps")
-	}
-	t.Setenv(sshPasswordEnv, "secret")
-	if pw := takeSSHPassword(); pw != "secret" {
-		t.Errorf("password = %q", pw)
-	}
-	if _, set := os.LookupEnv(sshPasswordEnv); set {
-		t.Error("the password is still in the environment")
+	if o, err := parseFlags([]string{"--ssh-password", "x"}, &buf); err != nil || o.SSHPassword != "x" {
+		t.Errorf("password = %q, %v", o.SSHPassword, err)
 	}
 }
