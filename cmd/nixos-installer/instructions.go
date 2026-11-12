@@ -14,6 +14,9 @@ const instructions = `Prepare the target machine first (it needs no operating sy
   2. On the machine, become root and set its password:  sudo -i, then passwd
   3. Note its IP address:  ip addr
 
+Stay at its console (or a remote console such as IPMI): the LUKS passphrase
+and the secrets are typed there, so they never pass through this machine.
+
 Press Enter when the installer is running... `
 
 // showInstructions tells the operator how to prepare the target and waits for

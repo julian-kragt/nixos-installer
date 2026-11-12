@@ -1,14 +1,17 @@
 // Package luks puts the LUKS passphrase on the target, where the config's
-// disko.nix reads it during the install.
+// disko.nix reads it during the install. The operator types it at the
+// target's console, so the provider never sees it.
 package luks
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
+	"installer/internal/console"
 	"installer/internal/machine"
 	"installer/internal/runner"
 )
@@ -17,27 +20,21 @@ import (
 // can point it elsewhere.
 var passwordPath = "/tmp/disko-password"
 
-// AskAndSend asks for the passphrase (twice) and puts it in passwordPath on
-// target. The passphrase is only ever in memory, on stdin of a quiet command and
-// in that file: not in the environment (every child process sees it), not in
-// args, not in the log.
-func AskAndSend(ctx context.Context, target machine.Machine) error {
-	pw, err := askPassphrase(ctx)
-	if err != nil {
-		return err
-	}
-	return sendPassphrase(ctx, target, pw)
+// Ask has the operator type the passphrase at the console of the session's
+// target, where the helper writes it to passwordPath.
+func Ask(ctx context.Context, s console.Session) error {
+	return s.Run(ctx, "the LUKS passphrase", "luks", s.Host)
 }
 
-// Ensure asks for the passphrase again when it is not on target any more, as
-// after a reboot of the ISO.
-func Ensure(ctx context.Context, target machine.Machine) error {
+// Present reports whether the passphrase is on target. After a reboot of the
+// ISO it is not.
+func Present(ctx context.Context, target machine.Machine) (bool, error) {
 	_, err := target.Run(ctx, "test", "-s", passwordPath)
 	var exit *exec.ExitError
 	if errors.As(err, &exit) && exit.ExitCode() == 1 {
-		return AskAndSend(ctx, target)
+		return false, nil
 	}
-	return err
+	return err == nil, err
 }
 
 // Remove deletes passwordPath on target and reports whether it was there.
@@ -49,6 +46,29 @@ func Remove(ctx context.Context, target machine.Machine) (bool, error) {
 		return false, fmt.Errorf("remove %s: %w", passwordPath, err)
 	}
 	return strings.TrimSpace(out) == "removed", nil
+}
+
+// Type runs in the console helper on the target: it asks for the passphrase
+// until two non-empty answers agree and writes it, without a newline, to
+// passwordPath (mode 600). The passphrase is only ever in memory and in that
+// file: not in args, the environment or a log.
+func Type(ctx context.Context) error {
+	pw, err := askPassphrase(ctx)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(passwordPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	f, err := os.OpenFile(passwordPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(pw); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 // askPassphrase asks until two non-empty answers agree.
@@ -67,15 +87,4 @@ func askPassphrase(ctx context.Context) (string, error) {
 			return first, nil
 		}
 	}
-}
-
-// sendPassphrase writes pw, without a newline, to passwordPath (mode 600) on
-// target.
-func sendPassphrase(ctx context.Context, target machine.Machine, pw string) error {
-	_, err := target.Quiet().RunStdin(ctx, strings.NewReader(pw),
-		"sh", "-c", `rm -f "$1" && umask 077 && cat > "$1"`, "sh", passwordPath)
-	if err != nil {
-		return fmt.Errorf("send LUKS passphrase: %w", err)
-	}
-	return nil
 }

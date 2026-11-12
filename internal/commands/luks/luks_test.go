@@ -11,7 +11,17 @@ import (
 	"installer/internal/runner"
 )
 
-func TestAskAndSend(t *testing.T) {
+// at points passwordPath into a temp dir for the test and returns it.
+func at(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "disko-password")
+	old := passwordPath
+	passwordPath = path
+	t.Cleanup(func() { passwordPath = old })
+	return path
+}
+
+func TestType(t *testing.T) {
 	cases := []struct {
 		name, input, want string
 		wantErr           bool
@@ -22,54 +32,44 @@ func TestAskAndSend(t *testing.T) {
 		{"no operator", "", "", true},
 	}
 	for _, c := range cases {
-		path := filepath.Join(t.TempDir(), "disko-password")
-		old := passwordPath
-		passwordPath = path
-		ui := runner.New(runner.Options{In: strings.NewReader(c.input)})
-		err := AskAndSend(runner.NewContext(context.Background(), ui), machine.Loopback())
-		passwordPath = old
-		if c.wantErr {
-			if err == nil {
-				t.Errorf("%s: want an error", c.name)
+		t.Run(c.name, func(t *testing.T) {
+			path := at(t)
+			// A stale file of another mode is replaced, not reused.
+			if err := os.WriteFile(path, []byte("old passphrase"), 0o644); err != nil {
+				t.Fatal(err)
 			}
-			continue
-		}
-		data, rerr := os.ReadFile(path)
-		fi, _ := os.Stat(path)
-		if err != nil || rerr != nil || string(data) != c.want || fi.Mode().Perm() != 0o600 {
-			t.Errorf("%s: err=%v read=%v data=%q mode=%v", c.name, err, rerr, data, fi.Mode())
-		}
+			ui := runner.New(runner.Options{In: strings.NewReader(c.input)})
+			err := Type(runner.NewContext(context.Background(), ui))
+			if c.wantErr {
+				if err == nil {
+					t.Error("want an error")
+				}
+				return
+			}
+			data, rerr := os.ReadFile(path)
+			fi, _ := os.Stat(path)
+			if err != nil || rerr != nil || string(data) != c.want || fi.Mode().Perm() != 0o600 {
+				t.Errorf("err=%v read=%v data=%q mode=%v", err, rerr, data, fi.Mode())
+			}
+		})
 	}
 }
 
-func TestEnsure(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "disko-password")
-	old := passwordPath
-	passwordPath = path
-	defer func() { passwordPath = old }()
-
-	// Gone, as after a reboot of the ISO: asked again.
-	ui := runner.New(runner.Options{In: strings.NewReader("s3cret\ns3cret\n")})
-	if err := Ensure(runner.NewContext(context.Background(), ui), machine.Loopback()); err != nil {
+func TestPresent(t *testing.T) {
+	path := at(t)
+	if present, err := Present(context.Background(), machine.Loopback()); err != nil || present {
+		t.Fatalf("gone: present = %v, %v", present, err)
+	}
+	if err := os.WriteFile(path, []byte("s3cret"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(path); string(data) != "s3cret" {
-		t.Fatalf("file = %q", data)
-	}
-
-	// Still there: nothing is asked, and there is nobody to answer.
-	ui = runner.New(runner.Options{In: strings.NewReader("")})
-	if err := Ensure(runner.NewContext(context.Background(), ui), machine.Loopback()); err != nil {
-		t.Errorf("present: %v", err)
+	if present, err := Present(context.Background(), machine.Loopback()); err != nil || !present {
+		t.Errorf("there: present = %v, %v", present, err)
 	}
 }
 
 func TestRemove(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "disko-password")
-	old := passwordPath
-	passwordPath = path
-	defer func() { passwordPath = old }()
-
+	path := at(t)
 	if err := os.WriteFile(path, []byte("s3cret"), 0o600); err != nil {
 		t.Fatal(err)
 	}
