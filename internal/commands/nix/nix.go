@@ -60,10 +60,10 @@ func (c Config) eval(ctx context.Context, attr string, out any, extra ...string)
 }
 
 // SecretsLayout reads the layout of the nix-secrets repository at c: its
-// installerSecretsData output, secrets-entry.nix checked by nixos-bootstrap. It
-// is secrets.ErrNoEntry when the working tree has no secrets-entry.nix.
+// installerSecretsData output, its secretsEntry checked by nixos-bootstrap. It
+// is secrets.ErrNoEntry when the working tree has no flake.nix.
 func (c Config) SecretsLayout(ctx context.Context) (secrets.Layout, error) {
-	if _, err := os.Stat(filepath.Join(c.Dir, secrets.EntryFile)); c.Rev == "" && errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(c.Dir, secrets.FlakeFile)); c.Rev == "" && errors.Is(err, os.ErrNotExist) {
 		return secrets.Layout{}, secrets.ErrNoEntry
 	}
 	var l secrets.Layout

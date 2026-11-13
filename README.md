@@ -43,13 +43,13 @@ Every stage is described in [docs/stages.md](docs/stages.md).
 **Your config** is a flake that:
 
 - uses [nixos-bootstrap](https://github.com/julian-kragt/nixos-bootstrap) and lists the host in `bootstrapEntries`;
-- has a non-flake input named `nix-secrets`, a `git+ssh://` URL of your secrets repository;
+- has a flake input named `nix-secrets`, a `git+ssh://` URL of your secrets repository;
 - reads the host's secrets with sops-nix from the paths and keys the installer writes.
 
 **Your secrets repository** is laid out like
-[nix-secrets-reference](https://github.com/julian-kragt/nix-secrets-reference): a `.sops.yaml`, and a
-`secrets-entry.nix` that says where host and user files and their templates are, and whether users have a file per
-host, one shared by their hosts, or both. Its flake outputs that layout as `installerSecretsData`, checked by
+[nix-secrets-reference](https://github.com/julian-kragt/nix-secrets-reference): a `.sops.yaml`, and a flake
+whose `secretsEntry` output says where host and user files and their templates are, and whether users have a file per
+host, one shared by their hosts, or both. The flake also outputs that layout as `installerSecretsData`, checked by
 nixos-bootstrap.
 
 [docs/setup.md](docs/setup.md) shows both.

@@ -102,7 +102,7 @@ func askConfigDir(ctx context.Context, dir string) (string, error) {
 func checkConfigDir(dir string) (string, error) { return dirWith(dir, "flake.nix") }
 
 // askSecretsDir returns dir, or asks for the nix-secrets repository until it
-// holds a .sops.yaml and a secrets-entry.nix when dir is empty.
+// holds a .sops.yaml and a flake.nix when dir is empty.
 func askSecretsDir(ctx context.Context, dir string) (string, error) {
 	if dir != "" {
 		return checkSecretsDir(dir)
@@ -111,12 +111,12 @@ func askSecretsDir(ctx context.Context, dir string) (string, error) {
 }
 
 // checkSecretsDir returns the absolute path of dir if it holds a .sops.yaml
-// and the secrets-entry.nix that declares its layout.
+// and the flake.nix whose secretsEntry declares its layout.
 func checkSecretsDir(dir string) (string, error) {
 	if _, err := dirWith(dir, secrets.ConfigFile); err != nil {
 		return "", err
 	}
-	return dirWith(dir, secrets.EntryFile)
+	return dirWith(dir, secrets.FlakeFile)
 }
 
 // dirWith returns the absolute path of dir, with a leading ~ expanded, if it

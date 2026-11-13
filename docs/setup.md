@@ -51,13 +51,14 @@ The bootstrap system has no SSH in its initrd, so someone types the passphrase a
 
 ### The `nix-secrets` input
 
-The config reads the secrets repository through a non-flake input that must be named `nix-secrets` and must be a
-`git+ssh://` URL:
+The config reads the secrets repository through a flake input that must be named `nix-secrets` and must be a
+`git+ssh://` URL. It uses the config's `nixpkgs` and nixos-bootstrap, which checks its `secretsEntry`:
 
 ```nix
 inputs.nix-secrets = {
   url = "git+ssh://git@github.com/you/nix-secrets.git?ref=main&shallow=1";
-  flake = false;
+  inputs.nixpkgs.follows = "nixpkgs";
+  inputs.nixos-bootstrap.follows = "nixos-bootstrap";
 };
 ```
 
@@ -70,10 +71,10 @@ your repositories.
 The installer creates one age key for the host and one for each user on the host (stages 1.2 and 1.3) and encrypts the
 files to them. Point sops-nix at those keys, and only those:
 
-Take the paths from the secrets repository's layout, through nixos-bootstrap, so they follow its `secrets-entry.nix`:
+Take the paths from the secrets repository's layout, through nixos-bootstrap, so they follow its `secretsEntry` output:
 
 ```nix
-secretsLayout = inputs.nixos-bootstrap.lib.secretsLayout { inherit lib; root = inputs.nix-secrets; };
+secretsLayout = inputs.nixos-bootstrap.lib.secretsLayout { inherit lib; secretsFlake = inputs.nix-secrets; };
 ```
 
 ```nix
@@ -132,12 +133,12 @@ ahead of or behind its upstream. The target builds only the pushed revision.
 Start from [nix-secrets-reference](https://github.com/julian-kragt/nix-secrets-reference): copy it (don't fork it)
 into a **private** repository and clone that. Its `DESIGN.md` explains the layout in depth.
 
-`secrets-entry.nix` declares where each kind of file is. The installer reads it, checked, from the repository flake's
-`installerSecretsData` output; it must be committed. With the reference's values:
+The `secretsEntry` output of its `flake.nix` declares where each kind of file is. The installer reads it, checked, from
+the flake's `installerSecretsData` output; it must be committed. With the reference's values:
 
 ```
 .sops.yaml                      which recipients decrypt which file
-secrets-entry.nix               the layout: userMode, directories, templates
+flake.nix                       secretsEntry, the layout: userMode, directories, templates
 hosts/<host>.yaml               the host's own secrets            → the host's key
 host-users/<host>-<user>.yaml   a user's secrets on one host      → the host's key + the user's key on that host
 templates/host.yaml             the keys every host file holds

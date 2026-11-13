@@ -76,7 +76,7 @@ func pushedProblems(ctx context.Context, env *pipeline.Env, commit string, users
 	case err != nil:
 		problems = append(problems, err.Error())
 	case at != layout:
-		problems = append(problems, fmt.Sprintf("%s: the layout is %+v, not %+v as when the install started", secrets.EntryFile, at, layout))
+		problems = append(problems, fmt.Sprintf("secretsEntry: the layout is %+v, not %+v as when the install started", at, layout))
 	}
 
 	paths, err := repo.Files(ctx, commit, append([]string{secrets.ConfigFile}, layout.Dirs()...)...)

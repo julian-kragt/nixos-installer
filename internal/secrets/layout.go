@@ -16,9 +16,9 @@ import (
 // ConfigFile is the sops configuration at the top of the repository.
 const ConfigFile = ".sops.yaml"
 
-// EntryFile declares the repository's Layout, checked by nixos-bootstrap and
-// read through the repository flake's installerSecretsData output.
-const EntryFile = "secrets-entry.nix"
+// FlakeFile is the repository's flake. Its secretsEntry output declares the
+// Layout, which installers read checked, as its installerSecretsData output.
+const FlakeFile = "flake.nix"
 
 // UserMode is how a repository keeps users' secrets.
 type UserMode string
@@ -100,7 +100,7 @@ func (l Layout) Check() error {
 }
 
 // ErrNoEntry means the repository does not declare its layout.
-var ErrNoEntry = errors.New("nix-secrets has no " + EntryFile + "; add it, with its installerSecretsData flake output (see nix-secrets-reference)")
+var ErrNoEntry = errors.New("nix-secrets has no " + FlakeFile + "; add one with secretsEntry and installerSecretsData outputs (see nix-secrets-reference)")
 
 // userName is a user name the layout keeps apart from any other: no dashes,
 // so <hostUserPath>/<host>-<user>.yaml names one host and user, and no regex

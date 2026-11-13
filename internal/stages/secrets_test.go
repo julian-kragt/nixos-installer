@@ -74,7 +74,7 @@ esac
 	top := t.TempDir()
 	dir := filepath.Join(top, sub)
 	gitIn(t, top, "init", "-q", "-b", "main")
-	put(t, dir, "secrets-entry.nix", "{ }\n")
+	put(t, dir, "flake.nix", "{ }\n")
 	put(t, dir, ".sops.yaml", "keys:\n  - &host_other age1other\ncreation_rules:\n  - path_regex: ^hosts/other\\.yaml$\n    key_groups:\n      - age:\n          - *host_other\n")
 	put(t, dir, "host-users/myhost-gone.yaml", encrypted)
 	put(t, dir, "host-users/other-jdoe.yaml", encrypted)
