@@ -49,3 +49,16 @@ func TestSSHPasswordFlag(t *testing.T) {
 		t.Errorf("password = %q, %v", o.SSHPassword, err)
 	}
 }
+
+func TestRekeyViaFlag(t *testing.T) {
+	var buf bytes.Buffer
+	o, err := parseFlags([]string{"--rekey-via", "atlas=192.0.2.20", "--rekey-via", "broadway=broadway.lan"}, &buf)
+	if err != nil || o.RekeyVia["atlas"] != "192.0.2.20" || o.RekeyVia["broadway"] != "broadway.lan" || len(o.RekeyVia) != 2 {
+		t.Fatalf("rekey-via = %v, %v", o.RekeyVia, err)
+	}
+	for _, bad := range []string{"atlas", "=192.0.2.20", "atlas="} {
+		if _, err := parseFlags([]string{"--rekey-via", bad}, &buf); err == nil {
+			t.Errorf("%q: no error", bad)
+		}
+	}
+}

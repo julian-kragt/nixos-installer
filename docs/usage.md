@@ -130,7 +130,7 @@ Ctrl+C stops the installer and anything it started on the target's console. Pres
 | Repository | Stage | Message | Files |
 |---|---|---|---|
 | config | 0.2 | `chore(<host>): update generated hardware config` | the host's hardware config |
-| secrets | 2.4 | `chore(<host>): update secrets` | `.sops.yaml`, `hosts/<host>.yaml`, `host-users/<host>-*.yaml` |
+| secrets | 2.4 | `chore(<host>): update secrets` | `.sops.yaml`, the host's file, its users' per-host and shared files, and the shared files of users who left it |
 | config | 3.1 | `chore(<host>): lock nix-secrets at <commit>` | `flake.lock` |
 
 Each commit holds only those files and is made only when something changed.

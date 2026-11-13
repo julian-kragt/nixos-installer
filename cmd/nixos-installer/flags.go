@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+	"strings"
 
 	"github.com/julian-kragt/nixos-installer/internal/pipeline"
 )
@@ -32,6 +33,17 @@ func parseFlags(args []string, stderr io.Writer) (options, error) {
 	fs.StringVar(&o.SSHPassword, "ssh-password", "", "Root SSH password of the NixOS ISO for the initial key bootstrap (prompts when empty)")
 	fs.BoolVar(&o.Reinstall, "reinstall", false, "Install the host again from the NixOS ISO: its saved state and pinned host key are replaced once the wipe is confirmed")
 	fs.BoolVar(&o.GenerateHardware, "generate-hardware", false, "Generate a missing hardware config from the target without asking")
+	fs.Func("rekey-via", "`host=address` of an installed host that reads a shared secret file, for encrypting it to a new host (repeatable; default: the host's name)", func(v string) error {
+		host, addr, ok := strings.Cut(v, "=")
+		if !ok || host == "" || addr == "" {
+			return fmt.Errorf("%q is not host=address", v)
+		}
+		if o.RekeyVia == nil {
+			o.RekeyVia = map[string]string{}
+		}
+		o.RekeyVia[host] = addr
+		return nil
+	})
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}

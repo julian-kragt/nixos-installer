@@ -46,9 +46,11 @@ Every stage is described in [docs/stages.md](docs/stages.md).
 - has a non-flake input named `nix-secrets`, a `git+ssh://` URL of your secrets repository;
 - reads the host's secrets with sops-nix from the paths and keys the installer writes.
 
-**Your secrets repository** has the layout of
-[nix-secrets-reference](https://github.com/julian-kragt/nix-secrets-reference): `.sops.yaml`, `templates/host.yaml`,
-`templates/user.yaml`, `hosts/` and `host-users/`.
+**Your secrets repository** is laid out like
+[nix-secrets-reference](https://github.com/julian-kragt/nix-secrets-reference): a `.sops.yaml`, and a
+`secrets-entry.nix` that says where host and user files and their templates are, and whether users have a file per
+host, one shared by their hosts, or both. Its flake outputs that layout as `installerSecretsData`, checked by
+nixos-bootstrap.
 
 [docs/setup.md](docs/setup.md) shows both.
 
@@ -76,11 +78,13 @@ Every flag that takes a value is asked for when it is left out, so a plain `nixo
 | `--ssh-password <password>` | Root password of the NixOS ISO, used once to install your SSH key on it. Asked for only when needed. It only lives in the ISO's memory, so passing it as a flag is fine. |
 | `--reinstall` | Install the host again from the NixOS ISO, starting from a fresh state. The saved state and pinned host key are replaced only once you confirm the wipe. |
 | `--generate-hardware` | Generate a missing hardware config from the target without asking. |
+| `--rekey-via <host>=<address>` | Where to reach an installed host that reads a shared secret file, to encrypt it to this host too. Repeatable. Default: the host's name. |
 | `--verbose` | Show debug messages and debug steps. |
 
 The installer stops to ask you before anything it can't take back: the wipe (type `install`), a new `.sops.yaml` rule
 that goes before an existing one (`add`), replacing a host's recipients after a reinstall (`replace`), a changed SSH
-host key on the ISO (`trust`), and a missing hardware config (`yes`). Without a terminal it fails instead of asking.
+host key on the ISO, or an unpinned one on a host that re-encrypts a shared file (`trust`), and a missing hardware
+config (`yes`). Without a terminal it fails instead of asking.
 
 A full walk-through, and what to do when something fails, is in [docs/usage.md](docs/usage.md).
 

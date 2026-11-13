@@ -60,14 +60,9 @@ func UserAnchor(host, user string) string { return "user_" + user + "_" + host }
 // it matches that file only.
 func FileRule(file string) string { return "^" + regexp.QuoteMeta(file) + "$" }
 
-// HostRule is the path_regex of host's own file.
-func HostRule(host string) string { return FileRule(HostFile(host)) }
-
-// UserRule is the path_regex of user's file on host.
-func UserRule(host, user string) string { return FileRule(UserFile(host, user)) }
-
 // Host is what .sops.yaml must say about one host's files: its own file is
-// encrypted to the host, a user's file to the host and that user's key on it.
+// encrypted to the host, a user's per-host file to the host and that user's key
+// on it, and a user's shared file to at least those two.
 type Host struct {
 	Name      string
 	Recipient string            // the host's age recipient
@@ -102,35 +97,73 @@ func (c *Config) Replacements(h Host) []Replaced {
 	return out
 }
 
-// Apply makes c say exactly h about h's files: the anchors with their
-// recipients, one rule per file with exactly its recipients. A recipient an
-// operator wrote literally into such a rule stays. Rules and anchors of users
-// no longer on the host are removed; it returns those users, sorted. An anchor
-// that a rule of another host still uses stays. sops uses the first rule that
-// matches a file: a missing rule is added before the first rule that matches
-// its file, but check with Shadowed first that no rule comes before an
-// existing one, and with Insertions which rules a new one goes before.
-func (c *Config) Apply(h Host) []string {
+// Applied is what Apply changed besides the files of the host's users.
+type Applied struct {
+	// Removed is the users no longer on the host, sorted.
+	Removed []string
+	// Left is the shared files of removed users that other hosts still read:
+	// they need encrypting to their rule's recipients again, without the host.
+	Left []string
+	// Emptied is the shared files of removed users that nobody reads any more:
+	// their rule is gone and the files go too.
+	Emptied []string
+}
+
+// Apply makes c say h about h's files in layout l: the anchors with their
+// recipients, one rule per file. The rules of the host's own and per-host user
+// files list exactly their recipients; the rule of a shared user file lists
+// the host and the user's key on it besides those of the user's other hosts.
+// A recipient an operator wrote literally into a rule stays. Rules and anchors
+// of users no longer on the host are removed, and so is the host from their
+// shared rules. An anchor that a rule of another host still uses stays. sops
+// uses the first rule that matches a file: a missing rule is added before the
+// first rule that matches its file, but check with Shadowed first that no rule
+// comes before an existing one, and with Insertions which rules a new one goes
+// before.
+func (c *Config) Apply(l Layout, h Host) Applied {
 	for _, a := range h.anchors() {
 		c.setKey(a.name, a.recipient)
 	}
-	c.setRule(HostFile(h.Name), HostAnchor(h.Name))
+	host := HostAnchor(h.Name)
+	c.setRule(l.HostFile(h.Name), host)
 	for _, u := range slices.Sorted(maps.Keys(h.Users)) {
-		c.setRule(UserFile(h.Name, u), HostAnchor(h.Name), UserAnchor(h.Name, u))
+		if l.HasHostUser() {
+			c.setRule(l.HostUserFile(h.Name, u), host, UserAnchor(h.Name, u))
+		}
+		if l.HasShared() {
+			c.addToRule(l.SharedUserFile(u), host, UserAnchor(h.Name, u))
+		}
 	}
 
-	var removed []string
-	for _, u := range c.ruleUsers(h.Name) {
+	var out Applied
+	removed := map[string]bool{}
+	for _, u := range c.ruleUsers(l, h.Name) {
 		if _, ok := h.Users[u]; ok {
 			continue
 		}
-		c.removeRule(UserRule(h.Name, u))
+		c.removeRule(FileRule(l.HostUserFile(h.Name, u)))
+		removed[u] = true
+	}
+	for _, u := range c.sharedRuleUsers(l, h.Name) {
+		if _, ok := h.Users[u]; ok {
+			continue
+		}
+		file := l.SharedUserFile(u)
+		if c.removeFromRule(FileRule(file), host, UserAnchor(h.Name, u)) {
+			out.Left = append(out.Left, file)
+		} else {
+			c.removeRule(FileRule(file))
+			out.Emptied = append(out.Emptied, file)
+		}
+		removed[u] = true
+	}
+	for _, u := range slices.Sorted(maps.Keys(removed)) {
 		if !c.uses(UserAnchor(h.Name, u)) {
 			c.removeKey(UserAnchor(h.Name, u))
 		}
-		removed = append(removed, u)
+		out.Removed = append(out.Removed, u)
 	}
-	return removed
+	return out
 }
 
 // Inserted is a rule Apply adds for File before Before, the path_regex of a
@@ -147,9 +180,9 @@ func (i Inserted) String() string {
 // path_regex that matches their file, in the order of h's files. A rule
 // without path_regex, a catch-all, is not listed. A path_regex that does not
 // compile is an error, so it is reported before anything changes.
-func (c *Config) Insertions(h Host) ([]Inserted, error) {
+func (c *Config) Insertions(l Layout, h Host) ([]Inserted, error) {
 	var out []Inserted
-	for _, file := range Files(h.Name, slices.Sorted(maps.Keys(h.Users))) {
+	for _, file := range l.Files(h.Name, slices.Sorted(maps.Keys(h.Users))) {
 		if c.HasRule(file) {
 			continue
 		}
@@ -212,6 +245,30 @@ func (c *Config) Shadowed(files []string) ([]Shadow, error) {
 // HasRule reports whether file, relative to the repository, has a rule of its
 // own (FileRule), wherever it is.
 func (c *Config) HasRule(file string) bool { return c.ruleIndex(FileRule(file)) >= 0 }
+
+// RuleHosts returns the hosts whose key the rule sops uses for file lists by
+// alias, with that key, in the order of the rule.
+func (c *Config) RuleHosts(file string) ([]HostKey, error) {
+	rule, _, err := c.firstRule(file)
+	if err != nil || rule == nil {
+		return nil, err
+	}
+	aliases, _ := ageKeys(rule)
+	var out []HostKey
+	for _, a := range aliases {
+		host, ok := strings.CutPrefix(a, "host_")
+		if !ok {
+			continue
+		}
+		if r, ok := c.Key(a); ok {
+			out = append(out, HostKey{Host: host, Recipient: r})
+		}
+	}
+	return out, nil
+}
+
+// HostKey is a host and the recipient of its key.
+type HostKey struct{ Host, Recipient string }
 
 // Recipients returns the recipients of the rule sops uses for file, the first
 // that matches it: those it lists by alias, then those it lists literally.
@@ -283,6 +340,45 @@ func (c *Config) removeKey(anchor string) {
 // missing rule is added before the first rule that matches file, so sops uses
 // it, or at the end. A rule that already says this is left as it is.
 func (c *Config) setRule(file string, anchors ...string) {
+	c.editRule(file, anchors, func([]string) []string { return anchors })
+}
+
+// addToRule is setRule for a rule that keeps the aliases it has: anchors it
+// lacks are added after them.
+func (c *Config) addToRule(file string, anchors ...string) {
+	c.editRule(file, anchors, func(have []string) []string {
+		out := slices.Clone(have)
+		for _, a := range anchors {
+			if !slices.Contains(out, a) {
+				out = append(out, a)
+			}
+		}
+		return out
+	})
+}
+
+// removeFromRule drops anchors from every rule whose path_regex is regex and
+// reports whether a recipient is left in them, by alias or literally.
+func (c *Config) removeFromRule(regex string, anchors ...string) bool {
+	left := false
+	for _, rule := range c.list("creation_rules") {
+		if v := value(rule, "path_regex"); v == nil || v.Value != regex {
+			continue
+		}
+		aliases, literals := ageKeys(rule)
+		kept := slices.DeleteFunc(slices.Clone(aliases), func(a string) bool { return slices.Contains(anchors, a) })
+		if !slices.Equal(kept, aliases) {
+			setValue(rule, "key_groups", keyGroups(kept, literals))
+		}
+		left = left || len(kept)+len(literals) > 0
+	}
+	return left
+}
+
+// editRule gives every rule of file the aliases want returns for the aliases
+// it has, in one age key group with its literal recipients, or adds the rule
+// with anchors when there is none.
+func (c *Config) editRule(file string, anchors []string, want func(have []string) []string) {
 	regex := FileRule(file)
 	found := false
 	for _, rule := range c.list("creation_rules") {
@@ -291,8 +387,9 @@ func (c *Config) setRule(file string, anchors ...string) {
 		}
 		found = true
 		aliases, literals := ageKeys(rule)
-		if groups := value(rule, "key_groups"); !slices.Equal(aliases, anchors) || groups == nil || len(groups.Content) != 1 {
-			setValue(rule, "key_groups", keyGroups(anchors, literals))
+		wanted := want(aliases)
+		if groups := value(rule, "key_groups"); !slices.Equal(aliases, wanted) || groups == nil || len(groups.Content) != 1 {
+			setValue(rule, "key_groups", keyGroups(wanted, literals))
 		}
 	}
 	if found {
@@ -347,9 +444,28 @@ func (c *Config) uses(anchor string) bool {
 }
 
 // ruleUsers returns the users, sorted and once each, that have a rule for a
-// file of host and whose rule lists the host's key.
-func (c *Config) ruleUsers(host string) []string {
-	prefix, suffix := `^host-users/`+regexp.QuoteMeta(host)+"-", `\.yaml$`
+// per-host file of host in l and whose rule lists the host's key.
+func (c *Config) ruleUsers(l Layout, host string) []string {
+	if !l.HasHostUser() {
+		return nil
+	}
+	return c.usersOfRules(`^`+regexp.QuoteMeta(l.HostUserPath+"/"+host+"-"), host)
+}
+
+// sharedRuleUsers returns the users, sorted and once each, that have a rule
+// for a shared file in l that lists host's key.
+func (c *Config) sharedRuleUsers(l Layout, host string) []string {
+	if !l.HasShared() {
+		return nil
+	}
+	return c.usersOfRules(`^`+regexp.QuoteMeta(l.SharedUserPath+"/"), host)
+}
+
+// usersOfRules returns the users, sorted and once each, of the rules whose
+// path_regex is prefix, a user name and the end of a .yaml file, and that list
+// host's key.
+func (c *Config) usersOfRules(prefix, host string) []string {
+	suffix := `\.yaml$`
 	var users []string
 	for _, r := range c.list("creation_rules") {
 		v := value(r, "path_regex")

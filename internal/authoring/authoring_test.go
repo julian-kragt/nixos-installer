@@ -17,8 +17,8 @@ import (
 
 func TestArg(t *testing.T) {
 	for _, f := range []File{
-		{Path: "hosts/myhost.yaml", Template: secrets.HostTemplate},
-		{Path: "host-users/myhost-jdoe.yaml", Template: secrets.UserTemplate, User: "jdoe"},
+		{Path: "hosts/myhost.yaml", Template: secrets.ReferenceLayout.HostTemplate},
+		{Path: "host-users/myhost-jdoe.yaml", Template: secrets.ReferenceLayout.HostUserTemplate, User: "jdoe"},
 	} {
 		got, err := ParseArg(f.Arg())
 		if err != nil || got != f {
@@ -66,7 +66,7 @@ func TestAuthorHashesAndEncrypts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Apply(secrets.Host{Name: "myhost", Recipient: recipient, Users: map[string]string{"jdoe": recipient}})
+	cfg.Apply(secrets.ReferenceLayout, secrets.Host{Name: "myhost", Recipient: recipient, Users: map[string]string{"jdoe": recipient}})
 	data, err := cfg.Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -80,12 +80,12 @@ func TestAuthorHashesAndEncrypts(t *testing.T) {
 		}
 	}
 	write(secrets.ConfigFile, string(data))
-	write(secrets.UserTemplate, "# the login password\nhashedPassword: change_me\n")
+	write(secrets.ReferenceLayout.HostUserTemplate, "# the login password\nhashedPassword: change_me\n")
 
 	const password = "c0rrect-horse"
 	ui := runner.New(runner.Options{Out: &bytes.Buffer{}, In: strings.NewReader(password + "\n" + password + "\n")})
 	defer ui.Close()
-	f := File{Path: secrets.UserFile("myhost", "jdoe"), Template: secrets.UserTemplate, User: "jdoe"}
+	f := File{Path: secrets.ReferenceLayout.HostUserFile("myhost", "jdoe"), Template: secrets.ReferenceLayout.HostUserTemplate, User: "jdoe"}
 	if err := Author(runner.NewContext(context.Background(), ui), machine.Local(), dir, "myhost", f); err != nil {
 		t.Fatal(err)
 	}

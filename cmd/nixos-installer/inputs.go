@@ -15,6 +15,7 @@ import (
 	"github.com/julian-kragt/nixos-installer/internal/machine"
 	"github.com/julian-kragt/nixos-installer/internal/pipeline"
 	"github.com/julian-kragt/nixos-installer/internal/runner"
+	"github.com/julian-kragt/nixos-installer/internal/secrets"
 	"github.com/julian-kragt/nixos-installer/internal/stages"
 )
 
@@ -101,7 +102,7 @@ func askConfigDir(ctx context.Context, dir string) (string, error) {
 func checkConfigDir(dir string) (string, error) { return dirWith(dir, "flake.nix") }
 
 // askSecretsDir returns dir, or asks for the nix-secrets repository until it
-// holds a .sops.yaml when dir is empty.
+// holds a .sops.yaml and a secrets-entry.nix when dir is empty.
 func askSecretsDir(ctx context.Context, dir string) (string, error) {
 	if dir != "" {
 		return checkSecretsDir(dir)
@@ -109,8 +110,14 @@ func askSecretsDir(ctx context.Context, dir string) (string, error) {
 	return askUntil(ctx, "Path to the secrets repository (the config's nix-secrets input)", "--secrets", checkSecretsDir)
 }
 
-// checkSecretsDir returns the absolute path of dir if it holds a .sops.yaml.
-func checkSecretsDir(dir string) (string, error) { return dirWith(dir, ".sops.yaml") }
+// checkSecretsDir returns the absolute path of dir if it holds a .sops.yaml
+// and the secrets-entry.nix that declares its layout.
+func checkSecretsDir(dir string) (string, error) {
+	if _, err := dirWith(dir, secrets.ConfigFile); err != nil {
+		return "", err
+	}
+	return dirWith(dir, secrets.EntryFile)
+}
 
 // dirWith returns the absolute path of dir, with a leading ~ expanded, if it
 // holds file.

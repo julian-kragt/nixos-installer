@@ -33,6 +33,10 @@
 //		Install the host again from the NixOS ISO, starting from a fresh state.
 //	--generate-hardware
 //		Generate a missing hardware config from the target without asking.
+//	--rekey-via host=address
+//		Address of an installed host that reads a shared secret file, for
+//		encrypting it to this host too. Repeatable; a host not given is
+//		reached at its name.
 //	--verbose
 //		Show debug messages and debug steps.
 //

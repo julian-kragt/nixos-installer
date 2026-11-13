@@ -16,8 +16,9 @@ import (
 // pushedSecrets checks nix-secrets as the host will build it: at
 // SecretsCommit, read from git, not from the clone's files. It runs before 3.1
 // locks the commit into the config, so a bad commit is never deployed. The
-// commit must be on the remote, and hold exactly the host's files for the
-// users of the config, each encrypted to the recipients of its own rule.
+// commit must be on the remote, have the layout 2.1 recorded, and hold exactly
+// the host's files for the users of the config, each encrypted to the
+// recipients of its own rule, as are the shared files its users left.
 // Nothing is decrypted. It reports every problem, then reopens 2.1 and every
 // stage after it, and fails: the next run checks the clone again, rewrites
 // what it can and locks and deploys the new commit. An
@@ -67,7 +68,18 @@ func pushedProblems(ctx context.Context, env *pipeline.Env, commit string, users
 		problems = append(problems, fmt.Sprintf("%.7s is not on the upstream of %s", commit, env.SecretsDir))
 	}
 
-	paths, err := repo.Files(ctx, commit, secrets.ConfigFile, "hosts", "host-users")
+	layout, err := secretsLayout(env)
+	if err != nil {
+		return nil, err
+	}
+	switch at, err := secretsFlake(env).At(commit).SecretsLayout(ctx); {
+	case err != nil:
+		problems = append(problems, err.Error())
+	case at != layout:
+		problems = append(problems, fmt.Sprintf("%s: the layout is %+v, not %+v as when the install started", secrets.EntryFile, at, layout))
+	}
+
+	paths, err := repo.Files(ctx, commit, append([]string{secrets.ConfigFile}, layout.Dirs()...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +96,7 @@ func pushedProblems(ctx context.Context, env *pipeline.Env, commit string, users
 		}
 	}
 
-	files := secrets.Files(env.Host, users)
+	files := layout.Files(env.Host, users)
 	if cfg != nil {
 		shadowed, err := cfg.Shadowed(files)
 		if err != nil {
@@ -111,8 +123,35 @@ func pushedProblems(ctx context.Context, env *pipeline.Env, commit string, users
 	}
 
 	for _, f := range paths {
-		if u, ok := secrets.FileUser(env.Host, f); ok && !slices.Contains(users, u) {
+		if u, ok := layout.FileUser(env.Host, f); ok && !slices.Contains(users, u) {
 			problems = append(problems, fmt.Sprintf("%s: %s is no longer a user of %s", f, u, env.Host))
+		}
+	}
+
+	// A shared file a user left goes to its rule's other recipients, or is
+	// gone with its rule.
+	for _, f := range env.State.LeftShared {
+		if slices.Contains(files, f) {
+			continue
+		}
+		var ciphertext []byte
+		if slices.Contains(paths, f) {
+			if ciphertext, err = repo.Show(ctx, commit, f); err != nil {
+				return nil, err
+			}
+		}
+		switch {
+		case cfg == nil:
+		case !cfg.HasRule(f) && ciphertext != nil:
+			problems = append(problems, f+": nobody reads it any more, but it is still there")
+		case cfg.HasRule(f):
+			problem, err := fileProblemAt(cfg, f, ciphertext)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", f, err)
+			}
+			if problem != "" {
+				problems = append(problems, f+": "+problem)
+			}
 		}
 	}
 	return problems, nil

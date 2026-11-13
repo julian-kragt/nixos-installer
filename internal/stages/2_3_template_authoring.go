@@ -23,7 +23,8 @@ import (
 var authoringDir = path.Join(console.Dir, "repo")
 
 // templateAuthoring makes every secret file of the host hold real values,
-// encrypted to the recipients .sops.yaml gives it. The operator writes the
+// encrypted to the recipients .sops.yaml gives it. A shared file that another
+// host reads is first encrypted again on that host (rekeyShared). The operator writes the
 // files that are not fine yet at the target's console: the helper there opens
 // the template in vim, asks for the passwords, hashes them and encrypts the
 // file with sops to public keys. The provider only reads back the ciphertext,
@@ -37,6 +38,10 @@ func templateAuthoring(ctx context.Context, env *pipeline.Env) error {
 	if err != nil {
 		return err
 	}
+	layout, err := secretsLayout(env)
+	if err != nil {
+		return err
+	}
 	data, err := os.ReadFile(filepath.Join(env.SecretsDir, secrets.ConfigFile))
 	if err != nil {
 		return err
@@ -45,10 +50,13 @@ func templateAuthoring(ctx context.Context, env *pipeline.Env) error {
 	if err != nil {
 		return err
 	}
+	if err := rekeyShared(ctx, env, layout, cfg, data, users); err != nil {
+		return err
+	}
 
-	files := []authoring.File{{Path: secrets.HostFile(env.Host), Template: secrets.HostTemplate}}
-	for _, u := range users {
-		files = append(files, authoring.File{Path: secrets.UserFile(env.Host, u), Template: secrets.UserTemplate, User: u})
+	var files []authoring.File
+	for _, f := range layout.HostFiles(env.Host, users) {
+		files = append(files, authoring.File{Path: f.Path, Template: f.Template, User: f.User})
 	}
 	var todo []authoring.File
 	for _, f := range files {
@@ -76,7 +84,7 @@ func templateAuthoring(ctx context.Context, env *pipeline.Env) error {
 			return err
 		}},
 		runner.Step{Title: "Copy recipients and templates", Fn: func(ctx context.Context) error {
-			return stageAuthoringDir(ctx, env)
+			return stageAuthoringDir(ctx, env, layout)
 		}},
 	)
 	if err != nil {
@@ -110,11 +118,11 @@ func templateAuthoring(ctx context.Context, env *pipeline.Env) error {
 
 // stageAuthoringDir writes a fresh authoringDir on the target, with the
 // repository's .sops.yaml and templates: public data only.
-func stageAuthoringDir(ctx context.Context, env *pipeline.Env) error {
+func stageAuthoringDir(ctx context.Context, env *pipeline.Env, layout secrets.Layout) error {
 	if _, err := env.Remote.Run(ctx, "rm", "-rf", authoringDir); err != nil {
 		return err
 	}
-	for _, f := range []string{secrets.ConfigFile, secrets.HostTemplate, secrets.UserTemplate} {
+	for _, f := range append([]string{secrets.ConfigFile}, layout.Templates()...) {
 		data, err := os.ReadFile(filepath.Join(env.SecretsDir, f))
 		if err != nil {
 			return err

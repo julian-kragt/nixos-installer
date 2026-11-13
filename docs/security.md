@@ -26,11 +26,13 @@ from an SSH key.
 
 | Key | Where | Decrypts |
 |---|---|---|
-| Host | `/var/lib/sops-nix/key.txt` on the host, root only (1.2) | `hosts/<host>.yaml` and the host's `host-users/<host>-*.yaml` |
-| User on a host | `~/.config/sops/age/keys.txt` of that user on that host (1.3) | `host-users/<host>-<user>.yaml` only |
+| Host | `/var/lib/sops-nix/key.txt` on the host, root only (1.2) | the host's own file, its per-host user files and its users' shared files |
+| User on a host | `~/.config/sops/age/keys.txt` of that user on that host (1.3) | the user's per-host file there and their shared file |
 
 There is **no operator key**. No recipient is on every file, and no machine besides a host can decrypt that host's
-secrets. A compromised host exposes only its own secrets; a compromised provider exposes none. The cost is that a
+secrets. A compromised host exposes only its own secrets, and the shared files of its users when the secrets repository keeps
+those; a compromised provider exposes none. A shared file is re-encrypted to a new host on a host that already reads
+it, never on the provider. The cost is that a
 host's secrets are edited and re-encrypted on that host, and a reinstalled host's files have to be typed again: nobody
 holds the old key to re-encrypt them.
 

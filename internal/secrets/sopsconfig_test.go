@@ -46,15 +46,24 @@ func marshalConfig(t *testing.T, c *Config) []byte {
 	return out
 }
 
-// apply is c.Apply(h) on a config in which no rule comes before an existing
-// rule of h's files, as 2.2 checks.
+// ref is the layout of the fixture: per-host user files.
+var ref = ReferenceLayout
+
+// apply is c.Apply(ref, h) on a config in which no rule comes before an
+// existing rule of h's files, as 2.2 checks. It returns the removed users.
 func apply(t *testing.T, c *Config, h Host) []string {
 	t.Helper()
-	files := slices.DeleteFunc(Files(h.Name, slices.Sorted(maps.Keys(h.Users))), func(f string) bool { return !c.HasRule(f) })
+	return applyIn(t, c, ref, h).Removed
+}
+
+// applyIn is apply in layout l.
+func applyIn(t *testing.T, c *Config, l Layout, h Host) Applied {
+	t.Helper()
+	files := slices.DeleteFunc(l.Files(h.Name, slices.Sorted(maps.Keys(h.Users))), func(f string) bool { return !c.HasRule(f) })
 	if shadowed, err := c.Shadowed(files); err != nil || len(shadowed) != 0 {
 		t.Fatalf("shadowed = %+v, %v", shadowed, err)
 	}
-	return c.Apply(h)
+	return c.Apply(l, h)
 }
 
 // golden compares got with testdata/<name>.golden, or rewrites it with -update.
@@ -98,10 +107,10 @@ func TestChangedHostKey(t *testing.T) {
 	out := marshalConfig(t, c)
 	golden(t, "myhost", out)
 	// The SSH-derived key leaves myhost' rule but stays for workstation.
-	if r, _ := c.Recipients(UserFile("myhost", "jdoe")); !slices.Equal(r, []string{myhostKey, jdoeAt}) {
+	if r, _ := c.Recipients(ref.HostUserFile("myhost", "jdoe")); !slices.Equal(r, []string{myhostKey, jdoeAt}) {
 		t.Errorf("myhost-jdoe recipients = %q", r)
 	}
-	if r, _ := c.Recipients(UserFile("workstation", "jdoe")); !slices.Contains(r, oldUser) {
+	if r, _ := c.Recipients(ref.HostUserFile("workstation", "jdoe")); !slices.Contains(r, oldUser) {
 		t.Errorf("workstation-jdoe recipients = %q, want the shared key kept", r)
 	}
 }
@@ -133,7 +142,7 @@ func TestChangedUserKey(t *testing.T) {
 		t.Fatalf("replacements = %+v, want %+v", got, want)
 	}
 	apply(t, c, changed)
-	if r, _ := c.Recipients(UserFile("myhost", "jdoe")); !slices.Equal(r, []string{myhostKey, "age1new"}) {
+	if r, _ := c.Recipients(ref.HostUserFile("myhost", "jdoe")); !slices.Equal(r, []string{myhostKey, "age1new"}) {
 		t.Errorf("recipients = %q", r)
 	}
 }
@@ -155,7 +164,7 @@ func TestNewHostAddedAndRemovedUser(t *testing.T) {
 	if _, ok := c.Key("user_media_nexthost"); ok {
 		t.Error("anchor of the removed user is still there")
 	}
-	if _, err := c.Recipients(UserFile("nexthost", "media")); err == nil {
+	if _, err := c.Recipients(ref.HostUserFile("nexthost", "media")); err == nil {
 		t.Error("rule of the removed user is still there")
 	}
 }
@@ -165,8 +174,8 @@ func TestSameUserOnTwoHosts(t *testing.T) {
 	apply(t, c, myhost)
 	apply(t, c, Host{Name: "nexthost", Recipient: "age1nexthost", Users: map[string]string{"jdoe": "age1jb"}})
 	for file, want := range map[string][]string{
-		UserFile("myhost", "jdoe"):   {myhostKey, jdoeAt},
-		UserFile("nexthost", "jdoe"): {"age1nexthost", "age1jb"},
+		ref.HostUserFile("myhost", "jdoe"):   {myhostKey, jdoeAt},
+		ref.HostUserFile("nexthost", "jdoe"): {"age1nexthost", "age1jb"},
 	} {
 		if got, err := c.Recipients(file); err != nil || !slices.Equal(got, want) {
 			t.Errorf("%s: recipients = %q, %v, want %q", file, got, err, want)
@@ -180,7 +189,7 @@ func TestRuleOfAHostWithALongerNameIsNotTouched(t *testing.T) {
 	if removed := apply(t, c, Host{Name: "myhost", Recipient: myhostKey}); slices.Contains(removed, "dev-x") {
 		t.Errorf("removed = %q, took myhost-dev's user for myhost'", removed)
 	}
-	if _, err := c.Recipients(UserFile("myhost-dev", "x")); err != nil {
+	if _, err := c.Recipients(ref.HostUserFile("myhost-dev", "x")); err != nil {
 		t.Errorf("myhost-dev's rule is gone: %v", err)
 	}
 }
@@ -189,7 +198,7 @@ func TestNewRuleGoesLast(t *testing.T) {
 	c := fixture(t)
 	apply(t, c, Host{Name: "nexthost", Recipient: "age1nexthost"})
 	rules := c.seq("creation_rules").Content
-	if v := value(rules[len(rules)-1], "path_regex"); v == nil || v.Value != HostRule("nexthost") {
+	if v := value(rules[len(rules)-1], "path_regex"); v == nil || v.Value != FileRule(ref.HostFile("nexthost")) {
 		t.Errorf("last rule = %v, want nexthost's", v)
 	}
 }
@@ -203,8 +212,8 @@ func TestNewRuleGoesBeforeACatchAll(t *testing.T) {
 	}
 	apply(t, c, Host{Name: "myhost", Recipient: myhostKey, Users: map[string]string{"jdoe": jdoeAt}})
 	for file, want := range map[string][]string{
-		HostFile("myhost"):         {myhostKey},
-		UserFile("myhost", "jdoe"): {myhostKey, jdoeAt},
+		ref.HostFile("myhost"):             {myhostKey},
+		ref.HostUserFile("myhost", "jdoe"): {myhostKey, jdoeAt},
 	} {
 		if got, err := c.Recipients(file); err != nil || !slices.Equal(got, want) {
 			t.Errorf("%s: recipients = %q, %v; the catch-all shadows the new rule", file, got, err)
@@ -238,7 +247,7 @@ func TestDuplicateRules(t *testing.T) {
 			t.Errorf("%s still lists *user_jdoe", value(r, "path_regex").Value)
 		}
 	}
-	if want := []string{UserRule("myhost", "jdoe"), UserRule("myhost", "jdoe"), HostRule("myhost")}; !slices.Equal(regexes, want) {
+	if want := []string{FileRule(ref.HostUserFile("myhost", "jdoe")), FileRule(ref.HostUserFile("myhost", "jdoe")), FileRule(ref.HostFile("myhost"))}; !slices.Equal(regexes, want) {
 		t.Errorf("rules = %q, want %q", regexes, want)
 	}
 }
@@ -284,9 +293,9 @@ func TestReadsDoNotChangeTheConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.Recipients(HostFile("myhost"))
-	c.Shadowed([]string{HostFile("myhost")})
-	c.HasRule(HostFile("myhost"))
+	c.Recipients(ref.HostFile("myhost"))
+	c.Shadowed([]string{ref.HostFile("myhost")})
+	c.HasRule(ref.HostFile("myhost"))
 	c.Replacements(myhost)
 	if got := string(marshalConfig(t, c)); got != data {
 		t.Errorf("after reads:\n%s\nwant:\n%s", got, data)
@@ -309,16 +318,16 @@ func TestRecipientsOfAnUncoveredFile(t *testing.T) {
 }
 
 func TestFileRule(t *testing.T) {
-	if got, want := HostRule("myhost-dev"), `^hosts/myhost-dev\.yaml$`; got != want {
+	if got, want := FileRule(ref.HostFile("myhost-dev")), `^hosts/myhost-dev\.yaml$`; got != want {
 		t.Errorf("HostRule = %s, want %s", got, want)
 	}
-	if got, want := UserRule("myhost", "jdoe"), `^host-users/myhost-jdoe\.yaml$`; got != want {
+	if got, want := FileRule(ref.HostUserFile("myhost", "jdoe")), `^host-users/myhost-jdoe\.yaml$`; got != want {
 		t.Errorf("UserRule = %s, want %s", got, want)
 	}
 }
 
 func TestNothingShadowedInTheFixture(t *testing.T) {
-	files := []string{HostFile("myhost"), HostFile("workstation"), UserFile("myhost", "jdoe"), UserFile("workstation", "jdoe"), HostFile("nexthost")}
+	files := []string{ref.HostFile("myhost"), ref.HostFile("workstation"), ref.HostUserFile("myhost", "jdoe"), ref.HostUserFile("workstation", "jdoe"), ref.HostFile("nexthost")}
 	if shadowed, err := fixture(t).Shadowed(files); err != nil || len(shadowed) != 0 {
 		t.Errorf("shadowed = %+v, %v, want none", shadowed, err)
 	}
@@ -331,18 +340,18 @@ func TestShadowed(t *testing.T) {
 	const noRegex = "  - key_groups:\n      - age:\n          - *admin\n"
 	const own = "  - path_regex: ^hosts/myhost\\.yaml$\n    key_groups:\n      - age:\n          - *host_myhost\n"
 	const other = "  - path_regex: ^hosts/workstation\\.yaml$\n    key_groups:\n      - age:\n          - *admin\n"
-	files := []string{HostFile("myhost"), UserFile("myhost", "jdoe"), HostFile("myhost")}
+	files := []string{ref.HostFile("myhost"), ref.HostUserFile("myhost", "jdoe"), ref.HostFile("myhost")}
 	tests := []struct {
 		name, rules string
 		want        []Shadow
 	}{
-		{"broad rule before the own one", broad + own, []Shadow{{HostFile("myhost"), `path_regex ^hosts/.*\.yaml$`}}},
-		{"broad rule and no own one", broad, []Shadow{{HostFile("myhost"), `path_regex ^hosts/.*\.yaml$`}}},
+		{"broad rule before the own one", broad + own, []Shadow{{ref.HostFile("myhost"), `path_regex ^hosts/.*\.yaml$`}}},
+		{"broad rule and no own one", broad, []Shadow{{ref.HostFile("myhost"), `path_regex ^hosts/.*\.yaml$`}}},
 		{"rule without path_regex", noRegex + own, []Shadow{
-			{HostFile("myhost"), "creation rule 1, which has no path_regex"},
-			{UserFile("myhost", "jdoe"), "creation rule 1, which has no path_regex"},
+			{ref.HostFile("myhost"), "creation rule 1, which has no path_regex"},
+			{ref.HostUserFile("myhost", "jdoe"), "creation rule 1, which has no path_regex"},
 		}},
-		{"own rule first", own + broad + noRegex, []Shadow{{UserFile("myhost", "jdoe"), "creation rule 3, which has no path_regex"}}},
+		{"own rule first", own + broad + noRegex, []Shadow{{ref.HostUserFile("myhost", "jdoe"), "creation rule 3, which has no path_regex"}}},
 		{"another host's rule only", other, nil},
 	}
 	for _, tt := range tests {
@@ -363,7 +372,7 @@ func TestShadowedReportsABrokenRegex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Shadowed([]string{HostFile("myhost")}); err == nil || !strings.Contains(err.Error(), "path_regex") {
+	if _, err := c.Shadowed([]string{ref.HostFile("myhost")}); err == nil || !strings.Contains(err.Error(), "path_regex") {
 		t.Errorf("err = %v, want the broken path_regex named", err)
 	}
 }
@@ -383,8 +392,8 @@ func TestLiteralRecipientsInARuleStay(t *testing.T) {
 		t.Fatal(err)
 	}
 	for file, want := range map[string][]string{
-		HostFile("myhost"):         {myhostKey, "age1admin"},
-		UserFile("myhost", "jdoe"): {myhostKey, jdoeAt, "age1admin"},
+		ref.HostFile("myhost"):             {myhostKey, "age1admin"},
+		ref.HostUserFile("myhost", "jdoe"): {myhostKey, jdoeAt, "age1admin"},
 	} {
 		if got, err := again.Recipients(file); err != nil || !slices.Equal(got, want) {
 			t.Errorf("%s: recipients = %q, %v, want %q", file, got, err, want)
@@ -405,8 +414,8 @@ func TestInsertions(t *testing.T) {
 		name, rules string
 		want        []Inserted
 	}{
-		{"differently written rule", unescaped, []Inserted{{HostFile("myhost"), "^hosts/myhost.yaml$"}}},
-		{"rule for every user file", userGlob, []Inserted{{UserFile("myhost", "jdoe"), `^host-users/myhost-.*\.yaml$`}}},
+		{"differently written rule", unescaped, []Inserted{{ref.HostFile("myhost"), "^hosts/myhost.yaml$"}}},
+		{"rule for every user file", userGlob, []Inserted{{ref.HostUserFile("myhost", "jdoe"), `^host-users/myhost-.*\.yaml$`}}},
 		{"own rule", own, nil},
 		{"catch-all", noRegex, nil},
 	}
@@ -416,7 +425,7 @@ func TestInsertions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := c.Insertions(h)
+			got, err := c.Insertions(ref, h)
 			if err != nil || !slices.Equal(got, tt.want) {
 				t.Errorf("insertions = %+v, %v, want %+v", got, err, tt.want)
 			}
@@ -430,7 +439,98 @@ func TestInsertionsReportsABrokenRegex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Insertions(Host{Name: "myhost", Recipient: "age1myhost"}); err == nil || !strings.Contains(err.Error(), "path_regex") {
+	if _, err := c.Insertions(ref, Host{Name: "myhost", Recipient: "age1myhost"}); err == nil || !strings.Contains(err.Error(), "path_regex") {
 		t.Errorf("err = %v, want the broken path_regex named", err)
+	}
+}
+
+// sharedOnTwoHosts is an empty config after installing myhost and then
+// nexthost, both with jdoe, in layout l.
+func sharedOnTwoHosts(t *testing.T, l Layout) *Config {
+	t.Helper()
+	c, err := ParseConfig(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyIn(t, c, l, myhost)
+	applyIn(t, c, l, Host{Name: "nexthost", Recipient: "age1nexthost", Users: map[string]string{"jdoe": "age1jb"}})
+	return c
+}
+
+func TestSharedFileGoesToEveryHostOfItsUser(t *testing.T) {
+	c := sharedOnTwoHosts(t, shared)
+	if r, _ := c.Recipients("users/jdoe.yaml"); !slices.Equal(r, []string{myhostKey, jdoeAt, "age1nexthost", "age1jb"}) {
+		t.Errorf("recipients = %q", r)
+	}
+	hosts, err := c.RuleHosts("users/jdoe.yaml")
+	if want := []HostKey{{"myhost", myhostKey}, {"nexthost", "age1nexthost"}}; err != nil || !slices.Equal(hosts, want) {
+		t.Errorf("hosts = %+v, %v, want %+v", hosts, err, want)
+	}
+	if c.HasRule("host-users/myhost-jdoe.yaml") {
+		t.Error("shared layout got a per-host user rule")
+	}
+
+	before := marshalConfig(t, c)
+	applyIn(t, c, shared, myhost)
+	if after := marshalConfig(t, c); !bytes.Equal(before, after) {
+		t.Errorf("same host again changed the config:\n%s", after)
+	}
+}
+
+func TestUserLeavesASharedFile(t *testing.T) {
+	c := sharedOnTwoHosts(t, shared)
+	got := applyIn(t, c, shared, Host{Name: "nexthost", Recipient: "age1nexthost"})
+	if want := (Applied{Removed: []string{"jdoe"}, Left: []string{"users/jdoe.yaml"}}); !slices.Equal(got.Removed, want.Removed) || !slices.Equal(got.Left, want.Left) || got.Emptied != nil {
+		t.Errorf("applied = %+v, want %+v", got, want)
+	}
+	if r, _ := c.Recipients("users/jdoe.yaml"); !slices.Equal(r, []string{myhostKey, jdoeAt}) {
+		t.Errorf("recipients = %q", r)
+	}
+	if _, ok := c.Key(UserAnchor("nexthost", "jdoe")); ok {
+		t.Error("the anchor of jdoe on nexthost stayed")
+	}
+
+	got = applyIn(t, c, shared, Host{Name: "myhost", Recipient: myhostKey})
+	if !slices.Equal(got.Emptied, []string{"users/jdoe.yaml"}) || got.Left != nil {
+		t.Errorf("last host: applied = %+v", got)
+	}
+	if c.HasRule("users/jdoe.yaml") {
+		t.Error("the rule of a file nobody reads stayed")
+	}
+}
+
+func TestLiteralRecipientKeepsASharedFile(t *testing.T) {
+	c, err := ParseConfig([]byte("creation_rules:\n  - path_regex: ^users/jdoe\\.yaml$\n    key_groups:\n      - age:\n          - age1admin\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyIn(t, c, shared, myhost)
+	if r, _ := c.Recipients("users/jdoe.yaml"); !slices.Equal(r, []string{myhostKey, jdoeAt, "age1admin"}) {
+		t.Errorf("recipients = %q", r)
+	}
+	got := applyIn(t, c, shared, Host{Name: "myhost", Recipient: myhostKey})
+	if !slices.Equal(got.Left, []string{"users/jdoe.yaml"}) || got.Emptied != nil {
+		t.Errorf("applied = %+v", got)
+	}
+}
+
+func TestBothModeHasBothRules(t *testing.T) {
+	c := sharedOnTwoHosts(t, both)
+	want := map[string][]string{
+		"host-users/myhost-jdoe.yaml":   {myhostKey, jdoeAt},
+		"host-users/nexthost-jdoe.yaml": {"age1nexthost", "age1jb"},
+		"users/jdoe.yaml":               {myhostKey, jdoeAt, "age1nexthost", "age1jb"},
+	}
+	for file, w := range want {
+		if r, _ := c.Recipients(file); !slices.Equal(r, w) {
+			t.Errorf("%s: recipients = %q, want %q", file, r, w)
+		}
+	}
+	got := applyIn(t, c, both, Host{Name: "nexthost", Recipient: "age1nexthost"})
+	if !slices.Equal(got.Removed, []string{"jdoe"}) || !slices.Equal(got.Left, []string{"users/jdoe.yaml"}) {
+		t.Errorf("applied = %+v", got)
+	}
+	if c.HasRule("host-users/nexthost-jdoe.yaml") {
+		t.Error("the per-host rule of a removed user stayed")
 	}
 }

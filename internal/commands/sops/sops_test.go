@@ -3,6 +3,7 @@ package sops
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,7 +55,7 @@ func newRepo(t *testing.T, recipient string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Apply(secrets.Host{Name: "myhost", Recipient: recipient, Users: map[string]string{"jdoe": recipient}})
+	cfg.Apply(secrets.ReferenceLayout, secrets.Host{Name: "myhost", Recipient: recipient, Users: map[string]string{"jdoe": recipient}})
 	data, err := cfg.Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +73,7 @@ func TestEncryptThenFieldsOnTheTarget(t *testing.T) {
 	needTools(t)
 	keyFile, recipient := newKey(t, t.TempDir())
 	dir := newRepo(t, recipient)
-	file := secrets.UserFile("myhost", "jdoe")
+	file := secrets.ReferenceLayout.HostUserFile("myhost", "jdoe")
 	doc := []byte("hashedPassword: '" + hash + "'\nnote: " + secret + "\nleft: change_me\n" +
 		"db:\n  key: |\n    -----BEGIN KEY-----\n    " + secret + "\n  servers:\n    - a\n    - b\n  pending:\n    - change_me\n")
 
@@ -115,7 +116,7 @@ func TestFieldsWithAnotherKey(t *testing.T) {
 	_, recipient := newKey(t, t.TempDir())
 	otherKey, _ := newKey(t, t.TempDir())
 	dir := newRepo(t, recipient)
-	file := secrets.HostFile("myhost")
+	file := secrets.ReferenceLayout.HostFile("myhost")
 	if err := (Repo{machine.Local(), dir}).Encrypt(context.Background(), file, []byte("placeholder: unused\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +133,7 @@ func TestFieldsWithoutTheKeyFile(t *testing.T) {
 	needTools(t)
 	_, recipient := newKey(t, t.TempDir())
 	dir := newRepo(t, recipient)
-	file := secrets.HostFile("myhost")
+	file := secrets.ReferenceLayout.HostFile("myhost")
 	if err := (Repo{machine.Local(), dir}).Encrypt(context.Background(), file, []byte("placeholder: unused\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -219,5 +220,73 @@ func TestClassPatternsClassifyLikeGo(t *testing.T) {
 		if want := string(secrets.Classify(v)); got[i] != want {
 			t.Errorf("%q: shell says %s, Classify %s", v, got[i], want)
 		}
+	}
+}
+
+// sharedLayout keeps users' secrets in one file for all their hosts, users/<user>.yaml.
+var sharedLayout = secrets.Layout{
+	UserMode:           secrets.Shared,
+	HostPath:           "hosts",
+	SharedUserPath:     "users",
+	HostTemplate:       "templates/host.yaml",
+	SharedUserTemplate: "templates/user.yaml",
+}
+
+// sharedConfig is .sops.yaml after installing each of hosts with jdoe, whose
+// key on each is the host's.
+func sharedConfig(t *testing.T, hosts map[string]string) []byte {
+	t.Helper()
+	cfg, err := secrets.ParseConfig(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range slices.Sorted(maps.Keys(hosts)) {
+		cfg.Apply(sharedLayout, secrets.Host{Name: h, Recipient: hosts[h], Users: map[string]string{"jdoe": hosts[h]}})
+	}
+	data, err := cfg.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func TestUpdateKeysOnAHostThatReadsTheFile(t *testing.T) {
+	needTools(t)
+	oldKey, oldHost := newKey(t, t.TempDir())
+	newKeyFile, newHost := newKey(t, t.TempDir())
+	_, gone := newKey(t, t.TempDir())
+	file := sharedLayout.SharedUserFile("jdoe")
+
+	// Encrypted to oldhost and a host that left.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, secrets.ConfigFile), sharedConfig(t, map[string]string{"oldhost": oldHost, "gone": gone}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := (Repo{machine.Local(), dir}).Encrypt(context.Background(), file, []byte("token: "+secret+"\n")); err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := os.ReadFile(filepath.Join(dir, file))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Now for oldhost and newhost.
+	sopsConfig := sharedConfig(t, map[string]string{"oldhost": oldHost, "newhost": newHost})
+	if _, err := UpdateKeys(context.Background(), machine.Loopback(), newKeyFile, sopsConfig, file, ciphertext, true); err == nil {
+		t.Error("a key that does not read the file updated it")
+	}
+	out, err := UpdateKeys(context.Background(), machine.Loopback(), oldKey, sopsConfig, file, ciphertext, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), secret) {
+		t.Fatal("plaintext in the updated file")
+	}
+	if got, _ := Recipients(out); !slices.Equal(slices.Sorted(slices.Values(got)), slices.Sorted(slices.Values([]string{oldHost, newHost}))) {
+		t.Errorf("recipients = %q, want %s and %s", got, oldHost, newHost)
+	}
+	fields, err := Fields(context.Background(), machine.Loopback(), newKeyFile, out)
+	if err != nil || len(fields) != 1 || fields[0].Class != secrets.ClassValue {
+		t.Errorf("the new host reads %+v, %v", fields, err)
 	}
 }

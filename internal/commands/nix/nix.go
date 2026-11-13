@@ -4,6 +4,7 @@ package nix
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/secrets"
 )
 
 // Config is the config flake at Dir, an absolute path, so nix finds the
@@ -55,6 +57,23 @@ func evalJSON(ctx context.Context, m machine.Machine, installable string, out an
 func (c Config) eval(ctx context.Context, attr string, out any, extra ...string) error {
 	args := append([]string{"--no-write-lock-file"}, extra...)
 	return evalJSON(ctx, c.Machine, c.ref()+"#"+attr, out, args...)
+}
+
+// SecretsLayout reads the layout of the nix-secrets repository at c: its
+// installerSecretsData output, secrets-entry.nix checked by nixos-bootstrap. It
+// is secrets.ErrNoEntry when the working tree has no secrets-entry.nix.
+func (c Config) SecretsLayout(ctx context.Context) (secrets.Layout, error) {
+	if _, err := os.Stat(filepath.Join(c.Dir, secrets.EntryFile)); c.Rev == "" && errors.Is(err, os.ErrNotExist) {
+		return secrets.Layout{}, secrets.ErrNoEntry
+	}
+	var l secrets.Layout
+	if err := c.eval(ctx, "installerSecretsData", &l); err != nil {
+		return secrets.Layout{}, fmt.Errorf("read the nix-secrets layout: %w", err)
+	}
+	if err := l.Check(); err != nil {
+		return secrets.Layout{}, err
+	}
+	return l, nil
 }
 
 // nixCommandDisabled is what nix says when `nix config show` needs the

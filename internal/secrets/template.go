@@ -13,13 +13,6 @@ import (
 	"github.com/julian-kragt/nixos-installer/internal/runner"
 )
 
-// HostTemplate and UserTemplate are the schemas of a host's own file and of a
-// user's file, relative to the repository.
-const (
-	HostTemplate = "templates/host.yaml"
-	UserTemplate = "templates/user.yaml"
-)
-
 // passwordKey holds a crypt hash of the user's login password.
 const passwordKey = "hashedPassword"
 

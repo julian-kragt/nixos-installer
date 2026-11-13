@@ -70,9 +70,15 @@ your repositories.
 The installer creates one age key for the host and one for each user on the host (stages 1.2 and 1.3) and encrypts the
 files to them. Point sops-nix at those keys, and only those:
 
+Take the paths from the secrets repository's layout, through nixos-bootstrap, so they follow its `secrets-entry.nix`:
+
+```nix
+secretsLayout = inputs.nixos-bootstrap.lib.secretsLayout { inherit lib; root = inputs.nix-secrets; };
+```
+
 ```nix
 sops = {
-  defaultSopsFile = "${inputs.nix-secrets}/hosts/${config.networking.hostName}.yaml";
+  defaultSopsFile = "${inputs.nix-secrets}/${secretsLayout.hostFile config.networking.hostName}";
   validateSopsFiles = false;
   age = {
     keyFile = "/var/lib/sops-nix/key.txt"; # the host key, created by the installer
@@ -82,24 +88,26 @@ sops = {
 };
 ```
 
-Login passwords come from the user's file on the host, under the key `hashedPassword`. The installer finds the users
+Login passwords come from the user file whose template has `hashedPassword` (`passwordFile`; `null` when neither
+has). The installer finds the users
 whose password comes from sops by the secret's name, `passwords/<user>`, and checks after the switch that sops-nix
 decrypted it:
 
 ```nix
 sops.secrets."passwords/${user}" = {
-  sopsFile = "${inputs.nix-secrets}/host-users/${hostName}-${user}.yaml";
+  sopsFile = "${inputs.nix-secrets}/${secretsLayout.passwordFile hostName user}";
   key = "hashedPassword";
   neededForUsers = true;
 };
 users.users.${user}.hashedPasswordFile = config.sops.secrets."passwords/${user}".path;
 ```
 
-For Home Manager, a user's own key is at `~/.config/sops/age/keys.txt`:
+For Home Manager, a user's own key is at `~/.config/sops/age/keys.txt`. `homeFile` is the user's shared file where
+there is one, else their file on the host:
 
 ```nix
 sops = {
-  defaultSopsFile = "${inputs.nix-secrets}/host-users/${hostName}-${config.home.username}.yaml";
+  defaultSopsFile = "${inputs.nix-secrets}/${secretsLayout.homeFile hostName config.home.username}";
   age.keyFile = "${config.home.homeDirectory}/.config/sops/age/keys.txt";
   validateSopsFiles = false;
 };
@@ -124,17 +132,25 @@ ahead of or behind its upstream. The target builds only the pushed revision.
 Start from [nix-secrets-reference](https://github.com/julian-kragt/nix-secrets-reference): copy it (don't fork it)
 into a **private** repository and clone that. Its `DESIGN.md` explains the layout in depth.
 
+`secrets-entry.nix` declares where each kind of file is. The installer reads it, checked, from the repository flake's
+`installerSecretsData` output; it must be committed. With the reference's values:
+
 ```
 .sops.yaml                      which recipients decrypt which file
+secrets-entry.nix               the layout: userMode, directories, templates
 hosts/<host>.yaml               the host's own secrets            → the host's key
 host-users/<host>-<user>.yaml   a user's secrets on one host      → the host's key + the user's key on that host
 templates/host.yaml             the keys every host file holds
 templates/user.yaml             the keys every user file holds
 ```
 
+With `userMode = "shared"` (or `"both"`), a user also has one file for all their hosts, `<sharedUserPath>/<user>.yaml`,
+encrypted to each of those hosts and the user's key on each. When a host joins, the file is encrypted to it on a host
+that already reads it (see `--rekey-via`).
+
 ### Templates
 
-The templates are the schema of the two kinds of file. When the installer writes a file, it opens its template in vim
+The templates are the schema of each kind of file. When the installer writes a file, it opens its template in vim
 at the target's console. Each leaf is one of:
 
 | Leaf | Filled in by |

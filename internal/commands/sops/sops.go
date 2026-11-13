@@ -292,3 +292,53 @@ func Problem(ctx context.Context, target machine.Machine, keyFile string, cipher
 	}
 	return "", nil
 }
+
+// updateKeys re-encrypts the sops file on stdin to the recipients the
+// .sops.yaml in $1 gives the path $2, with the age key in $3, and with a new
+// data key when $4 is "rotate", then prints it. It works in a temp copy of the
+// repository's layout, since sops finds a file's rule by its path. sops comes
+// from nixpkgs where it is not installed. Its messages are dropped: they could
+// hold a value.
+const updateKeys = `d=$(mktemp -d) || exit 1
+trap 'rm -rf "$d"' EXIT
+cd "$d" || exit 1
+printf '%s' "$1" > .sops.yaml
+mkdir -p "$(dirname "$2")" && cat > "$2" || exit 1
+test -r "$3" || exit 4
+export SOPS_AGE_KEY_FILE="$3"
+s() { if command -v sops >/dev/null 2>&1; then sops "$@"; else nix run nixpkgs#sops -- "$@"; fi; }
+s updatekeys -y "$2" >/dev/null 2>&1 || exit 3
+if [ "$4" = rotate ]; then s rotate -i "$2" >/dev/null 2>&1 || exit 5; fi
+cat "$2"`
+
+// UpdateKeys encrypts ciphertext, the sops file at path file of the repository
+// whose .sops.yaml is sopsConfig, to the recipients sopsConfig gives it, on
+// holder with the age key at keyFile there, which must read it. With rotate it
+// also gets a new data key, so a recipient taken out of it learns nothing from
+// a later version. It returns the new ciphertext; the plaintext never leaves
+// holder.
+func UpdateKeys(ctx context.Context, holder machine.Machine, keyFile string, sopsConfig []byte, file string, ciphertext []byte, rotate bool) ([]byte, error) {
+	mode := "keep"
+	if rotate {
+		mode = "rotate"
+	}
+	out, err := holder.Quiet().RunStdin(ctx, bytes.NewReader(ciphertext), "sh", "-c", updateKeys, "sh", string(sopsConfig), file, keyFile, mode)
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			switch exit.ExitCode() {
+			case 3:
+				return nil, errors.New("sops updatekeys failed: the key there may not read the file (sops's message is hidden, since it could show a value)")
+			case 4:
+				return nil, fmt.Errorf("cannot read the age key %s there", keyFile)
+			case 5:
+				return nil, errors.New("sops rotate failed (sops's message is hidden, since it could show a value)")
+			}
+		}
+		return nil, err
+	}
+	if err := CheckCiphertext([]byte(out)); err != nil {
+		return nil, fmt.Errorf("sops updatekeys: %w", err)
+	}
+	return []byte(out), nil
+}

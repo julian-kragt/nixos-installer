@@ -47,8 +47,10 @@ func newConfig(t *testing.T, hosts ...string) string {
 func newSecrets(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".sops.yaml"), nil, 0o644); err != nil {
-		t.Fatal(err)
+	for _, f := range []string{".sops.yaml", "secrets-entry.nix"} {
+		if err := os.WriteFile(filepath.Join(dir, f), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return dir
 }
@@ -111,6 +113,13 @@ func TestAskSecretsDir(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "no .sops.yaml") {
 		t.Errorf("bad answer not explained: %q", out.String())
+	}
+	noEntry := t.TempDir()
+	if err := os.WriteFile(filepath.Join(noEntry, ".sops.yaml"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := askSecretsDir(ctx, noEntry); err == nil || !strings.Contains(err.Error(), "no secrets-entry.nix") {
+		t.Errorf("given secrets without secrets-entry.nix: err = %v", err)
 	}
 }
 

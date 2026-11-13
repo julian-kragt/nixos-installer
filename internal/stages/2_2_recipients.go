@@ -15,13 +15,20 @@ import (
 	"github.com/julian-kragt/nixos-installer/internal/secrets"
 )
 
-// recipients makes the nix-secrets clone's .sops.yaml say exactly who decrypts
-// the host's files: the host, and each user's own key on it. Files of users who
-// are no longer on the host are deleted; 2.4 commits that. It changes nothing
-// while a rule comes before one of the host's files' own rule, and asks before
-// a new rule goes before one that matched its file.
+// recipients makes the nix-secrets clone's .sops.yaml say who decrypts the
+// host's files: the host, and each user's own key on it, and for a shared user
+// file also the user's other hosts. Per-host files of users who are no longer
+// on the host are deleted, and so are their shared files when no other host
+// reads them; 2.4 commits that. Shared files other hosts still read are
+// recorded for 2.3 to encrypt again without the host. It changes nothing while
+// a rule comes before one of the host's files' own rule, and asks before a new
+// rule goes before one that matched its file.
 func recipients(ctx context.Context, env *pipeline.Env) error {
 	users, err := hostUsers(ctx, env)
+	if err != nil {
+		return err
+	}
+	layout, err := secretsLayout(env)
 	if err != nil {
 		return err
 	}
@@ -43,14 +50,14 @@ func recipients(ctx context.Context, env *pipeline.Env) error {
 	if err != nil {
 		return err
 	}
-	if err := checkRuleOrder(env, cfg, users); err != nil {
+	if err := checkRuleOrder(env, layout, cfg, users); err != nil {
 		return err
 	}
-	inserted, err := cfg.Insertions(want)
+	inserted, err := cfg.Insertions(layout, want)
 	if err != nil {
 		return err
 	}
-	stale, err := secrets.Stale(env.SecretsDir, env.Host, users)
+	stale, err := layout.Stale(env.SecretsDir, env.Host, users)
 	if err != nil {
 		return err
 	}
@@ -60,13 +67,27 @@ func recipients(ctx context.Context, env *pipeline.Env) error {
 	if err := confirmReplacements(ctx, cfg.Replacements(want)); err != nil {
 		return err
 	}
-	for _, u := range cfg.Apply(want) {
+	applied := cfg.Apply(layout, want)
+	for _, u := range applied.Removed {
 		runner.Info(ctx, "Removed the recipient of "+u+", who is no longer on "+env.Host)
 	}
 	out, err := cfg.Marshal()
 	if err != nil {
 		return err
 	}
+	// Recorded before .sops.yaml changes: a run that stops in between finds
+	// no removed users in it any more.
+	if left := slices.Concat(applied.Left, applied.Emptied); len(left) > 0 {
+		for _, f := range left {
+			if !slices.Contains(env.State.LeftShared, f) {
+				env.State.LeftShared = append(env.State.LeftShared, f)
+			}
+		}
+		if err := env.State.Save(); err != nil {
+			return fmt.Errorf("persist state: %w", err)
+		}
+	}
+	stale = append(stale, applied.Emptied...)
 	if !bytes.Equal(out, data) {
 		if err := os.WriteFile(path, out, 0o644); err != nil {
 			return err
@@ -75,7 +96,7 @@ func recipients(ctx context.Context, env *pipeline.Env) error {
 	}
 
 	for _, f := range stale {
-		if err := os.Remove(filepath.Join(env.SecretsDir, f)); err != nil {
+		if err := os.Remove(filepath.Join(env.SecretsDir, f)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		runner.Info(ctx, "Deleted "+f)
@@ -88,8 +109,8 @@ func recipients(ctx context.Context, env *pipeline.Env) error {
 // a broader one before it would give the file other recipients. A file
 // without a rule gets one from Apply, before any rule that matches it. Other
 // hosts' files are not this install's business.
-func checkRuleOrder(env *pipeline.Env, cfg *secrets.Config, users []string) error {
-	files := slices.DeleteFunc(secrets.Files(env.Host, users), func(f string) bool { return !cfg.HasRule(f) })
+func checkRuleOrder(env *pipeline.Env, layout secrets.Layout, cfg *secrets.Config, users []string) error {
+	files := slices.DeleteFunc(layout.Files(env.Host, users), func(f string) bool { return !cfg.HasRule(f) })
 	shadowed, err := cfg.Shadowed(files)
 	if err != nil || len(shadowed) == 0 {
 		return err

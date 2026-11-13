@@ -14,14 +14,26 @@ import (
 )
 
 // commitPush publishes the host's secrets as one commit in nix-secrets and
-// records the commit the system is built from. Every file is checked to be
+// records the commit the system is built from: the host's files, the shared
+// files its users left, and the deletions of 2.2. Every file is checked to be
 // encrypted first, so plaintext is never committed.
 func commitPush(ctx context.Context, env *pipeline.Env) error {
 	users, err := hostUsers(ctx, env)
 	if err != nil {
 		return err
 	}
-	files := secrets.Files(env.Host, users)
+	layout, err := secretsLayout(env)
+	if err != nil {
+		return err
+	}
+	files := layout.Files(env.Host, users)
+	// The shared files users left that other hosts still read; those nobody
+	// reads are deleted, below.
+	for _, f := range env.State.LeftShared {
+		if _, err := os.Stat(filepath.Join(env.SecretsDir, f)); err == nil && !slices.Contains(files, f) {
+			files = append(files, f)
+		}
+	}
 	for _, f := range files {
 		data, err := os.ReadFile(filepath.Join(env.SecretsDir, f))
 		if err != nil {
@@ -37,7 +49,7 @@ func commitPush(ctx context.Context, env *pipeline.Env) error {
 		return err
 	}
 	for _, p := range deleted {
-		if _, ok := secrets.FileUser(env.Host, p); ok {
+		if _, ok := layout.FileUser(env.Host, p); ok || slices.Contains(env.State.LeftShared, p) {
 			files = append(files, p)
 		}
 	}

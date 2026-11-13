@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	"github.com/julian-kragt/nixos-installer/internal/machine"
+	"github.com/julian-kragt/nixos-installer/internal/secrets"
 )
 
 // State is what must survive a restart of the installer, per host. Choices
@@ -21,6 +22,13 @@ type State struct {
 	// UserRecipients maps each user on the host to the recipient of their own
 	// age key on the target.
 	UserRecipients map[string]string `json:",omitempty"`
+	// SecretsLayout is where nix-secrets keeps each kind of file, read by 2.1,
+	// so a resumed install keeps writing where it started.
+	SecretsLayout *secrets.Layout `json:",omitempty"`
+	// LeftShared is the shared user files of users who left the host, which
+	// other hosts still read: 2.2 took the host out of their rules, 2.3
+	// encrypts them again, 2.4 and 2.5 commit and check them with the host's.
+	LeftShared []string `json:",omitempty"`
 	// SecretsCommit is the nix-secrets commit with the host's secrets.
 	SecretsCommit string `json:",omitempty"`
 	// ConfigRev is the pushed config commit whose lock file locks

@@ -72,8 +72,9 @@ drops out of the record.
 
 ### 2.1 Secrets repository
 
-Runs on the provider. The secrets clone has nothing uncommitted besides `.sops.yaml` and the host's own files, and is
-level with its upstream. User and host names fit the layout.
+Runs on the provider. Reads the secrets repository's layout, its `installerSecretsData` flake output, and records it
+for the rest of the install. The secrets clone has nothing uncommitted besides `.sops.yaml`, the host's own files and
+shared user files, and is level with its upstream. User and host names fit the layout.
 
 ### 2.2 Recipients
 
@@ -85,12 +86,19 @@ Runs on the provider. Makes `.sops.yaml` say exactly who decrypts the host's fil
 - A missing rule is inserted before the first rule that matches its file, or last. When that rule has a `path_regex`,
   you confirm by typing `add`.
 - An anchor with another recipient, as after a reinstall, is replaced after you type `replace`.
-- Removes the rules, anchors and files of users no longer on the host.
+- Removes the rules, anchors and per-host files of users no longer on the host.
+- A shared user file gets the host and the user's key on it added to its rule, next to the user's other hosts. A user
+  who left the host is taken out of their shared file's rule; the file is deleted only when no recipient is left, and
+  otherwise recorded for 2.3 to encrypt again.
 
 ### 2.3 Template authoring
 
 Runs on the provider, with the writing done at the target's console.
 
+- First, each shared user file whose recipients differ from its rule is encrypted to them again, on another host that
+  reads it: over ssh as root (at its name, or the address `--rekey-via` gives), with that host's pinned key, or one you
+  `trust`. `sops updatekeys` runs there, and `sops rotate` when a recipient was removed, so the plaintext stays on that
+  host. When no other host reads the file, as after reinstalling its only host, it is written again from its template.
 - The target checks each of the host's files: it exists, has the template's keys, and decrypts with the target's key.
 - For the files that are not fine, the provider copies `.sops.yaml` and the templates to `/run/nixos-installer/repo` on
   the target and starts the console helper on tty9. There you write each file in vim and type its passwords. `mkpasswd`

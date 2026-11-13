@@ -26,6 +26,9 @@ type Inputs struct {
 	Reinstall   bool   // install Host again from the ISO: start from a fresh state, replace what is saved once the wipe is confirmed
 	// GenerateHardware generates a missing hardware config without asking.
 	GenerateHardware bool
+	// RekeyVia is the address of an installed host by name, for the hosts
+	// 2.3 encrypts shared secret files on. A host not in it is reached at its name.
+	RekeyVia map[string]string
 }
 
 // Env is everything a stage needs besides its context. Parallel steps must

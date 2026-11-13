@@ -5,6 +5,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"slices"
 
@@ -82,6 +83,19 @@ func configRepo(env *pipeline.Env) git.Repo {
 // secretsRepo is the nix-secrets clone the secrets phase works in, on the provider.
 func secretsRepo(env *pipeline.Env) git.Repo {
 	return git.Repo{Machine: env.Local, Dir: env.SecretsDir}
+}
+
+// secretsFlake is the nix-secrets clone as a flake, evaluated on the provider.
+func secretsFlake(env *pipeline.Env) nix.Config {
+	return nix.Config{Machine: env.Local, Dir: env.SecretsDir}
+}
+
+// secretsLayout returns the nix-secrets layout 2.1 recorded.
+func secretsLayout(env *pipeline.Env) (secrets.Layout, error) {
+	if env.State.SecretsLayout == nil {
+		return secrets.Layout{}, errors.New("no nix-secrets layout is recorded; run stage " + stageSecretsRepository + " first")
+	}
+	return *env.State.SecretsLayout, nil
 }
 
 // hostInfos holds the config's entry for the host of each run, for hostInfo.

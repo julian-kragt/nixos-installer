@@ -14,6 +14,11 @@ import (
 	"github.com/julian-kragt/nixos-installer/internal/secrets"
 )
 
+// referenceLayoutJSON is secrets.ReferenceLayout as installerSecretsData prints it.
+const referenceLayoutJSON = `{"hostPath":"hosts","hostTemplatePath":"templates/host.yaml","hostUserPath":"host-users",` +
+	`"hostUserTemplatePath":"templates/user.yaml","passwordTemplate":"templates/user.yaml",` +
+	`"sharedUserPath":null,"sharedUserTemplatePath":null,"userMode":"per-host"}`
+
 // encrypted is a stand-in for a sops file; the stages only look at its shape.
 const encrypted = "hashedPassword: ENC[AES256_GCM,data:abc,type:str]\nsops:\n  age:\n    - recipient: age1myhost\n"
 
@@ -52,8 +57,12 @@ func secretsEnvIn(t *testing.T, sub string) (*pipeline.Env, string) {
 		t.Setenv(k, v)
 	}
 	bin := t.TempDir()
+	// nix-secrets' layout for installerSecretsData, the host's entry otherwise.
 	put(t, bin, "nix", `#!/bin/sh
-printf '%s' '{"users":{"jdoe":{"uid":1000,"home":"/home/jdoe"}}}'
+case "$*" in
+*installerSecretsData*) printf '%s' '`+referenceLayoutJSON+`' ;;
+*) printf '%s' '{"users":{"jdoe":{"uid":1000,"home":"/home/jdoe"}}}' ;;
+esac
 `)
 	if err := os.Chmod(filepath.Join(bin, "nix"), 0o755); err != nil {
 		t.Fatal(err)
@@ -65,6 +74,7 @@ printf '%s' '{"users":{"jdoe":{"uid":1000,"home":"/home/jdoe"}}}'
 	top := t.TempDir()
 	dir := filepath.Join(top, sub)
 	gitIn(t, top, "init", "-q", "-b", "main")
+	put(t, dir, "secrets-entry.nix", "{ }\n")
 	put(t, dir, ".sops.yaml", "keys:\n  - &host_other age1other\ncreation_rules:\n  - path_regex: ^hosts/other\\.yaml$\n    key_groups:\n      - age:\n          - *host_other\n")
 	put(t, dir, "host-users/myhost-gone.yaml", encrypted)
 	put(t, dir, "host-users/other-jdoe.yaml", encrypted)
@@ -79,6 +89,8 @@ printf '%s' '{"users":{"jdoe":{"uid":1000,"home":"/home/jdoe"}}}'
 		Local:  machine.Local(),
 	}
 	env.State.HostRecipient, env.State.UserRecipients = "age1myhost", map[string]string{"jdoe": "age1jdoe"}
+	layout := secrets.ReferenceLayout
+	env.State.SecretsLayout = &layout
 	return env, remote
 }
 
@@ -443,5 +455,80 @@ func TestPushedSecretsReopensTheSecretsPhase(t *testing.T) {
 	}
 	if got := strings.Join(saved.Completed, ","); got != "1.3" {
 		t.Errorf("saved completed = %s, want 1.3", got)
+	}
+}
+
+// In shared mode, a user who left myhost loses it from their shared file's
+// rule: the file stays for the other host that reads it, or goes when
+// nobody else does, and 2.4 commits both with myhost's files.
+func TestRecipientsThenCommitPushInSharedMode(t *testing.T) {
+	env, _ := secretsEnv(t)
+	ctx := context.Background()
+	dir := env.SecretsDir
+	env.State.SecretsLayout = &secrets.Layout{
+		UserMode:           secrets.Shared,
+		HostPath:           "hosts",
+		SharedUserPath:     "users",
+		HostTemplate:       "templates/host.yaml",
+		SharedUserTemplate: "templates/user.yaml",
+	}
+	put(t, dir, ".sops.yaml", `keys:
+  - &host_myhost age1myhost
+  - &user_gone_myhost age1gonemyhost
+  - &user_solo_myhost age1solomyhost
+  - &host_other age1other
+  - &user_gone_other age1goneother
+creation_rules:
+  - path_regex: ^users/gone\.yaml$
+    key_groups:
+      - age:
+          - *host_myhost
+          - *user_gone_myhost
+          - *host_other
+          - *user_gone_other
+  - path_regex: ^users/solo\.yaml$
+    key_groups:
+      - age:
+          - *host_myhost
+          - *user_solo_myhost
+`)
+	put(t, dir, "users/gone.yaml", encrypted)
+	put(t, dir, "users/solo.yaml", encrypted)
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "commit", "-q", "-m", "shared")
+	gitIn(t, dir, "push", "-q")
+
+	if err := recipients(ctx, env); err != nil {
+		t.Fatalf("2.2: %v", err)
+	}
+	if want := []string{"users/gone.yaml", "users/solo.yaml"}; !slices.Equal(env.State.LeftShared, want) {
+		t.Errorf("LeftShared = %q, want %q", env.State.LeftShared, want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "users/solo.yaml")); !os.IsNotExist(err) {
+		t.Errorf("file nobody reads: %v, want it deleted", err)
+	}
+	cfg, err := os.ReadFile(filepath.Join(dir, ".sops.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := string(cfg); strings.Contains(s, "solo") || strings.Contains(s, "user_gone_myhost") || !strings.Contains(s, "^users/jdoe\\.yaml$") {
+		t.Errorf(".sops.yaml:\n%s", s)
+	}
+
+	// What 2.3 would have written: myhost's files, and gone's on the other host.
+	put(t, dir, "hosts/myhost.yaml", encrypted)
+	put(t, dir, "users/jdoe.yaml", encrypted)
+	put(t, dir, "users/gone.yaml", strings.Replace(encrypted, "age1myhost", "age1other", 1))
+	if err := commitPush(ctx, env); err != nil {
+		t.Fatalf("2.4: %v", err)
+	}
+	if status := gitIn(t, dir, "status", "--porcelain"); status != "" {
+		t.Errorf("left uncommitted: %q", status)
+	}
+	changed := gitIn(t, dir, "show", "--no-renames", "--name-status", "--format=", "HEAD")
+	for _, want := range []string{"M\t.sops.yaml", "A\thosts/myhost.yaml", "A\tusers/jdoe.yaml", "M\tusers/gone.yaml", "D\tusers/solo.yaml"} {
+		if !strings.Contains(changed, want) {
+			t.Errorf("commit lacks %q:\n%s", want, changed)
+		}
 	}
 }
